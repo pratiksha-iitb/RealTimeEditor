@@ -1,0 +1,1057 @@
+/* =========================================
+   CODEMESH EDITOR
+========================================= */
+
+.editorPage {
+  width: 100%;
+  height: 100vh;
+
+  overflow: hidden;
+
+  background: #08090f;
+
+  color: #f4f4f5;
+
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+
+/* =========================================
+   NAVBAR
+========================================= */
+
+.editorNavbar {
+  height: 58px;
+
+  display: flex;
+  align-items: center;
+
+  padding: 0 18px;
+
+  border-bottom: 1px solid #20222c;
+
+  background: #0b0c12;
+}
+
+
+/* BRAND */
+
+.editorBrand {
+  width: 230px;
+
+  display: flex;
+  align-items: center;
+
+  gap: 8px;
+}
+
+.editorBrandLogo {
+  width: 25px;
+  height: 25px;
+
+  object-fit: contain;
+
+  display: block;
+}
+
+.editorBrandName {
+  font-size: 17px;
+
+  font-weight: 700;
+
+  letter-spacing: -0.4px;
+
+  background: linear-gradient(
+    90deg,
+    #f4f4f5,
+    #3b82f6,
+    #8b5cf6
+  );
+
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+
+/* ROOM */
+
+.roomInfo {
+  display: flex;
+
+  align-items: center;
+
+  gap: 9px;
+}
+
+.roomLabel {
+  color: #555866;
+
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+
+  font-size: 9px;
+
+  letter-spacing: 1px;
+}
+
+.roomIdButton {
+  display: flex;
+
+  align-items: center;
+
+  gap: 8px;
+
+  padding: 6px 9px;
+
+  border: 1px solid #252733;
+
+  border-radius: 6px;
+
+  background: #101119;
+
+  color: #a1a3b0;
+
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+
+  font-size: 10px;
+
+  cursor: pointer;
+}
+
+.roomIdButton:hover {
+  border-color: #3b3d4b;
+
+  color: #e4e4e7;
+}
+
+.roomIdButton span {
+  color: #777987;
+}
+
+
+/* RIGHT NAV */
+
+.editorNavRight {
+  margin-left: auto;
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 16px;
+}
+
+.connectionStatus {
+  display: flex;
+
+  align-items: center;
+
+  gap: 6px;
+
+  color: #858796;
+
+  font-size: 11px;
+}
+
+.connectionStatus span {
+  width: 6px;
+  height: 6px;
+
+  border-radius: 50%;
+
+  background: #4ade80;
+
+  box-shadow:
+    0 0 7px rgba(74, 222, 128, 0.7);
+}
+
+.leaveButton {
+  padding: 6px 12px;
+
+  border: 1px solid #292b35;
+
+  border-radius: 6px;
+
+  background: transparent;
+
+  color: #858796;
+
+  font-size: 11px;
+
+  cursor: pointer;
+
+  transition: 0.2s;
+}
+
+.leaveButton:hover {
+  color: #f87171;
+
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+
+/* =========================================
+   MAIN LAYOUT
+========================================= */
+
+.editorLayout {
+  height: calc(100vh - 58px);
+
+  display: grid;
+
+  grid-template-columns:
+    230px
+    minmax(0, 1fr)
+    250px;
+}
+
+
+/* =========================================
+   LEFT SIDEBAR
+========================================= */
+
+.editorSidebar {
+  display: flex;
+
+  flex-direction: column;
+
+  border-right: 1px solid #20222c;
+
+  background: #0c0d13;
+}
+
+.sidebarSection {
+  padding: 17px 12px;
+
+  border-bottom: 1px solid #1b1d26;
+}
+
+.sidebarTitle {
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  margin-bottom: 15px;
+
+  color: #686b79;
+
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+
+  font-size: 9px;
+
+  letter-spacing: 1px;
+}
+
+.sidebarTitle button {
+  border: none;
+
+  background: transparent;
+
+  color: #666875;
+
+  font-size: 16px;
+
+  cursor: pointer;
+}
+
+.sidebarTitle button:hover {
+  color: #fff;
+}
+
+.workspaceName {
+  margin-bottom: 7px;
+
+  padding-left: 8px;
+
+  color: #515461;
+
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+
+  font-size: 9px;
+
+  letter-spacing: 0.5px;
+}
+
+
+/* FILES */
+
+.fileItem {
+  width: 100%;
+
+  height: 34px;
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 9px;
+
+  padding: 0 9px;
+
+  border: none;
+
+  border-radius: 5px;
+
+  background: transparent;
+
+  color: #888a98;
+
+  text-align: left;
+
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+
+  font-size: 11px;
+
+  cursor: pointer;
+}
+
+.fileItem:hover {
+  background: #151720;
+
+  color: #c9cad1;
+}
+
+.fileItem.active {
+  background: rgba(139, 92, 246, 0.1);
+
+  color: #e5e5e7;
+}
+
+.fileIcon {
+  width: 20px;
+
+  font-size: 8px;
+
+  font-weight: 700;
+
+  text-align: center;
+}
+
+.fileIcon.js {
+  color: #facc15;
+}
+
+.fileIcon.md {
+  color: #60a5fa;
+}
+
+
+/* COLLABORATORS */
+
+.collaboratorsSection {
+  flex: 0 0 auto;
+}
+
+.onlineCount {
+  width: 17px;
+  height: 17px;
+
+  display: flex;
+
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 50%;
+
+  background: rgba(74, 222, 128, 0.1);
+
+  color: #4ade80;
+
+  font-size: 8px;
+}
+
+.userItem {
+  height: 42px;
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 9px;
+
+  padding: 5px 6px;
+}
+
+.userAvatar {
+  width: 26px;
+  height: 26px;
+
+  display: flex;
+
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 50%;
+
+  color: white;
+
+  font-size: 9px;
+
+  font-weight: 700;
+}
+
+.purpleAvatar {
+  background: #8b5cf6;
+}
+
+.blueAvatar {
+  background: #0891b2;
+}
+
+.userDetails {
+  flex: 1;
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 2px;
+
+  overflow: hidden;
+}
+
+.userDetails span {
+  color: #b7b8c1;
+
+  font-size: 11px;
+
+  white-space: nowrap;
+
+  overflow: hidden;
+
+  text-overflow: ellipsis;
+}
+
+.userDetails small {
+  color: #555866;
+
+  font-size: 8px;
+}
+
+.userOnline {
+  width: 5px;
+  height: 5px;
+
+  border-radius: 50%;
+
+  background: #4ade80;
+}
+
+
+/* SIDEBAR BOTTOM */
+
+.sidebarBottom {
+  margin-top: auto;
+
+  padding: 12px;
+}
+
+.roomCardSmall {
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 5px;
+
+  padding: 12px;
+
+  border: 1px solid #20222c;
+
+  border-radius: 7px;
+
+  background: #101119;
+}
+
+.smallLabel {
+  color: #555866;
+
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+
+  font-size: 8px;
+
+  letter-spacing: 1px;
+}
+
+.roomCardSmall strong {
+  color: #b9bac3;
+
+  font-size: 11px;
+}
+
+.smallRoomId {
+  overflow: hidden;
+
+  color: #555866;
+
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+
+  font-size: 8px;
+
+  text-overflow: ellipsis;
+}
+
+
+/* =========================================
+   EDITOR MAIN
+========================================= */
+
+.editorMain {
+  min-width: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  background: #08090f;
+}
+
+
+/* TOOLBAR */
+
+.editorToolbar {
+  height: 44px;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  border-bottom: 1px solid #20222c;
+
+  background: #0d0e15;
+}
+
+.activeTab {
+  height: 100%;
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 8px;
+
+  padding: 0 16px;
+
+  border-right: 1px solid #20222c;
+
+  color: #bcbec8;
+
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+
+  font-size: 10px;
+}
+
+.jsTab {
+  color: #facc15;
+
+  font-size: 8px;
+
+  font-weight: 700;
+}
+
+.unsaved {
+  color: #8b5cf6;
+
+  font-size: 8px;
+}
+
+.toolbarRight {
+  display: flex;
+
+  align-items: center;
+
+  gap: 8px;
+
+  padding-right: 10px;
+}
+
+.languageSelect {
+  padding: 6px 9px;
+
+  border: 1px solid #242631;
+
+  border-radius: 5px;
+
+  outline: none;
+
+  background: #11121a;
+
+  color: #858796;
+
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+
+  font-size: 9px;
+}
+
+.runButton {
+  padding: 6px 12px;
+
+  border: none;
+
+  border-radius: 5px;
+
+  background: #7c3aed;
+
+  color: white;
+
+  font-size: 10px;
+
+  font-weight: 600;
+
+  cursor: pointer;
+}
+
+.runButton:hover {
+  background: #8b5cf6;
+}
+
+
+/* =========================================
+   CODE EDITOR
+========================================= */
+
+.codeEditor {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #08090f;
+}
+
+.codeMirrorWrapper {
+  width: 100%;
+  height: 100%;
+}
+
+.codeMirrorWrapper .cm-editor {
+  width: 100%;
+  height: 100%;
+}
+
+.codeMirrorWrapper .cm-scroller {
+  overflow: auto;
+}
+
+/* =========================================
+   STATUS BAR
+========================================= */
+
+.editorStatusBar {
+  height: 25px;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  padding: 0 10px;
+
+  border-top: 1px solid #20222c;
+
+  background: #0d0e15;
+
+  color: #5f6270;
+
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+
+  font-size: 8px;
+}
+
+.statusLeft,
+.statusRight {
+  display: flex;
+
+  align-items: center;
+
+  gap: 15px;
+}
+
+.syncStatus {
+  display: flex;
+
+  align-items: center;
+
+  gap: 5px;
+
+  color: #6f9b7d;
+}
+
+.syncStatus span {
+  width: 5px;
+  height: 5px;
+
+  border-radius: 50%;
+
+  background: #4ade80;
+}
+
+
+/* =========================================
+   RIGHT PANEL
+========================================= */
+
+.rightPanel {
+  border-left: 1px solid #20222c;
+
+  background: #0c0d13;
+}
+
+.panelHeader {
+  height: 44px;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  padding: 0 14px;
+
+  border-bottom: 1px solid #20222c;
+
+  color: #686b79;
+
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+
+  font-size: 9px;
+
+  letter-spacing: 0.8px;
+}
+
+.liveBadge {
+  padding: 3px 6px;
+
+  border-radius: 4px;
+
+  background: rgba(74, 222, 128, 0.08);
+
+  color: #4ade80;
+
+  font-size: 7px;
+}
+
+.activityList {
+  padding: 10px 12px;
+}
+
+.activityItem {
+  display: flex;
+
+  gap: 9px;
+
+  padding: 10px 2px;
+}
+
+.activityAvatar {
+  width: 25px;
+  height: 25px;
+
+  flex-shrink: 0;
+
+  display: flex;
+
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 50%;
+
+  color: white;
+
+  font-size: 8px;
+
+  font-weight: 700;
+}
+
+.activityItem strong {
+  color: #bcbec7;
+
+  font-size: 10px;
+}
+
+.activityItem p {
+  margin: 3px 0;
+
+  color: #686b79;
+
+  font-size: 9px;
+
+  line-height: 1.4;
+}
+
+.activityItem p b {
+  color: #898b97;
+}
+
+.activityItem small {
+  color: #454752;
+
+  font-size: 8px;
+}
+
+.panelDivider {
+  height: 1px;
+
+  margin: 4px 14px;
+
+  background: #1b1d26;
+}
+
+.panelInfo {
+  padding: 18px 14px;
+}
+
+.infoLabel {
+  color: #555866;
+
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+
+  font-size: 8px;
+
+  letter-spacing: 1px;
+}
+
+.panelInfo h3 {
+  margin: 10px 0 7px;
+
+  color: #c5c6ce;
+
+  font-size: 12px;
+}
+
+.panelInfo p {
+  margin: 0;
+
+  color: #5e606c;
+
+  font-size: 10px;
+
+  line-height: 1.6;
+}
+.codeMirrorWrapper,
+.codeMirrorWrapper .cm-editor,
+.codeMirrorWrapper .cm-scroller,
+.codeMirrorWrapper .cm-content,
+.codeMirrorWrapper .cm-line {
+  text-align: left;
+}
+.codeEditor {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #08090f;
+}
+
+.codeMirrorWrapper {
+  width: 100%;
+  height: 100%;
+}
+
+.codeMirrorWrapper .cm-editor {
+  width: 100%;
+  height: 100%;
+}
+
+.codeMirrorWrapper .cm-scroller {
+  overflow: auto;
+}
+
+/* =========================================
+   LIVE ACTIVITY
+========================================= */
+
+.activityList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  max-height: 420px;
+}
+
+
+.activityItem {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+
+.activityAvatar {
+  width: 30px;
+  height: 30px;
+
+  min-width: 30px;
+
+  border-radius: 50%;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  font-size: 11px;
+  font-weight: 700;
+}
+
+
+.activityContent {
+  min-width: 0;
+}
+
+
+.activityContent strong {
+  display: block;
+
+  font-size: 12px;
+
+  color: #e5e7eb;
+
+  margin-bottom: 3px;
+}
+
+
+.activityContent p {
+  margin: 0;
+
+  font-size: 11px;
+
+  color: #777b8a;
+
+  line-height: 1.5;
+}
+
+
+.activityContent small {
+  display: block;
+
+  margin-top: 5px;
+
+  font-size: 9px;
+
+  color: #454854;
+}
+
+
+.emptyActivity {
+  padding: 35px 20px;
+
+  text-align: center;
+
+  color: #555966;
+}
+
+
+.emptyActivity span {
+  display: block;
+
+  font-size: 12px;
+}
+
+
+.emptyActivity small {
+  display: block;
+
+  margin-top: 6px;
+
+  font-size: 10px;
+
+  color: #3f424d;
+}
+
+
+.leaveAvatar {
+  background: #3a2028;
+
+  color: #f87171;
+}
+
+/* =========================================
+   RESPONSIVE
+========================================= */
+
+@media (max-width: 1000px) {
+
+  .editorLayout {
+    grid-template-columns:
+      200px
+      minmax(0, 1fr);
+  }
+
+  .rightPanel {
+    display: none;
+  }
+
+  .editorBrand {
+    width: 200px;
+  }
+}
+
+
+@media (max-width: 700px) {
+
+  .editorLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .editorSidebar {
+    display: none;
+  }
+
+  .roomInfo {
+    display: none;
+  }
+
+  .editorBrand {
+    width: auto;
+  }
+
+  .connectionStatus {
+    display: none;
+  }
+
+  .codeTextarea {
+    min-width: 500px;
+  }
+}

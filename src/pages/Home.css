@@ -1,0 +1,731 @@
+/* =================================
+   DESIGN SYSTEM
+================================= */
+
+:root {
+  --bg: #08090f;
+  --card: #11131c;
+  --input: #0b0c12;
+
+  --border: #242632;
+  --border-hover: #343746;
+
+  --text: #f4f4f5;
+  --muted: #9294a3;
+  --subtle: #5f6271;
+
+  --purple: #8b5cf6;
+  --blue: #3b82f6;
+  --cyan: #22d3ee;
+  --green: #4ade80;
+
+  --font:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+
+  --mono:
+    "SFMono-Regular",
+    Consolas,
+    "Liberation Mono",
+    monospace;
+}
+
+
+/* =================================
+   RESET
+================================= */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+}
+
+button,
+input {
+  font-family: inherit;
+}
+
+
+/* =================================
+   PAGE
+================================= */
+
+.homePage {
+  min-height: 100vh;
+
+  background:
+    radial-gradient(
+      circle at 50% 0%,
+      rgba(91, 70, 180, 0.10),
+      transparent 35%
+    ),
+    var(--bg);
+
+  overflow-x: hidden;
+}
+
+
+/* =================================
+   NAVBAR
+================================= */
+
+.navbar {
+  height: 68px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  padding: 0 6%;
+
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+
+  background: rgba(8, 9, 15, 0.85);
+
+  backdrop-filter: blur(12px);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.brandLogo {
+  width: 26px;
+  height: 26px;
+
+  object-fit: contain;
+
+  display: block;
+
+  flex-shrink: 0;
+}
+
+.brandName {
+  font-size: 18px;
+  font-weight: 700;
+
+  letter-spacing: -0.4px;
+
+  background: linear-gradient(
+    90deg,
+    #f4f4f5 20%,
+    var(--blue) 65%,
+    var(--purple)
+  );
+
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.githubButton {
+  padding: 8px 15px;
+
+  border: 1px solid var(--border);
+
+  border-radius: 7px;
+
+  background: transparent;
+
+  color: var(--text);
+
+  font-size: 13px;
+
+  text-decoration: none;
+
+  transition: 0.2s;
+}
+
+.githubButton:hover {
+  background: var(--card);
+  border-color: var(--border-hover);
+}
+
+
+/* =================================
+   MAIN
+================================= */
+
+.homeMain {
+  max-width: 1100px;
+
+  min-height: calc(100vh - 130px);
+
+  margin: 0 auto;
+
+  padding: 90px 30px;
+
+  display: grid;
+
+  grid-template-columns: 1fr 0.9fr;
+
+  align-items: center;
+
+  gap: 70px;
+}
+
+
+/* =================================
+   HERO
+================================= */
+
+.hero {
+  max-width: 500px;
+}
+
+.status {
+  display: inline-flex;
+
+  align-items: center;
+
+  gap: 8px;
+
+  padding: 6px 11px;
+
+  border: 1px solid rgba(139, 92, 246, 0.25);
+
+  border-radius: 20px;
+
+  background: rgba(139, 92, 246, 0.07);
+
+  color: #a78bfa;
+
+  font-size: 11px;
+}
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+
+  border-radius: 50%;
+
+  background: var(--green);
+
+  box-shadow: 0 0 7px var(--green);
+}
+
+.hero h1 {
+  margin: 24px 0 18px;
+
+  font-size: clamp(48px, 5vw, 64px);
+
+  line-height: 1.02;
+
+  letter-spacing: -3px;
+}
+
+.hero h1 span {
+  background: linear-gradient(
+    90deg,
+    #a78bfa,
+    var(--cyan)
+  );
+
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.description {
+  max-width: 470px;
+
+  margin: 0 0 32px;
+
+  color: var(--muted);
+
+  font-size: 16px;
+
+  line-height: 1.6;
+}
+
+
+/* =================================
+   ROOM CARD
+================================= */
+
+.roomCard {
+  width: 100%;
+
+  padding: 24px;
+
+  border: 1px solid var(--border);
+
+  border-radius: 12px;
+
+  background: var(--card);
+
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.25);
+}
+
+.roomCard h2 {
+  margin: 0 0 5px;
+
+  font-size: 18px;
+}
+
+.cardDescription {
+  margin: 0 0 20px;
+
+  color: var(--subtle);
+
+  font-size: 12px;
+}
+
+
+/* =================================
+   INPUTS
+================================= */
+
+.inputGroup {
+  margin-bottom: 14px;
+}
+
+.inputGroup label {
+  display: block;
+
+  margin-bottom: 6px;
+
+  color: var(--subtle);
+
+  font-family: var(--mono);
+
+  font-size: 9px;
+
+  letter-spacing: 1px;
+}
+
+.inputGroup input {
+  width: 100%;
+
+  height: 43px;
+
+  padding: 0 13px;
+
+  border: 1px solid var(--border);
+
+  border-radius: 7px;
+
+  outline: none;
+
+  background: var(--input);
+
+  color: var(--text);
+
+  font-size: 13px;
+
+  transition: 0.2s;
+}
+
+.inputGroup input::placeholder {
+  color: #4f5260;
+}
+
+.inputGroup input:focus {
+  border-color: var(--purple);
+
+  box-shadow:
+    0 0 0 3px rgba(139, 92, 246, 0.08);
+}
+
+
+/* =================================
+   BUTTONS
+================================= */
+
+.joinButton {
+  width: 100%;
+
+  height: 44px;
+
+  margin-top: 3px;
+
+  border: none;
+
+  border-radius: 7px;
+
+  background: linear-gradient(
+    90deg,
+    var(--purple),
+    #7137e8
+  );
+
+  color: white;
+
+  font-size: 13px;
+
+  font-weight: 600;
+
+  cursor: pointer;
+
+  transition: 0.2s;
+}
+
+.joinButton span {
+  margin-left: 8px;
+
+  font-size: 16px;
+}
+
+.joinButton:hover {
+  transform: translateY(-1px);
+
+  box-shadow:
+    0 8px 25px rgba(139, 92, 246, 0.22);
+}
+
+
+/* =================================
+   DIVIDER
+================================= */
+
+.divider {
+  display: flex;
+
+  align-items: center;
+
+  gap: 10px;
+
+  margin: 18px 0;
+
+  color: var(--subtle);
+
+  font-size: 9px;
+}
+
+.divider::before,
+.divider::after {
+  content: "";
+
+  height: 1px;
+
+  flex: 1;
+
+  background: var(--border);
+}
+
+
+/* =================================
+   CREATE BUTTON
+================================= */
+
+.createButton {
+  width: 100%;
+
+  height: 40px;
+
+  border: 1px solid var(--border);
+
+  border-radius: 7px;
+
+  background: transparent;
+
+  color: var(--muted);
+
+  font-size: 12px;
+
+  cursor: pointer;
+
+  transition: 0.2s;
+}
+
+.createButton:hover {
+  color: var(--text);
+
+  border-color: var(--border-hover);
+
+  background: rgba(255, 255, 255, 0.02);
+}
+
+
+/* =================================
+   EDITOR PREVIEW
+================================= */
+
+.editorPreview {
+  width: 100%;
+
+  overflow: hidden;
+
+  border: 1px solid var(--border);
+
+  border-radius: 11px;
+
+  background: #0c0d13;
+
+  box-shadow:
+    0 25px 70px rgba(0, 0, 0, 0.4);
+}
+
+
+/* =================================
+   EDITOR HEADER
+================================= */
+
+.editorHeader {
+  height: 42px;
+
+  display: flex;
+
+  align-items: center;
+
+  padding: 0 13px;
+
+  border-bottom: 1px solid var(--border);
+
+  background: #11121a;
+}
+
+.windowDots {
+  display: flex;
+
+  gap: 5px;
+}
+
+.windowDots span {
+  width: 7px;
+  height: 7px;
+
+  border-radius: 50%;
+
+  background: #3b3d49;
+}
+
+.fileName {
+  flex: 1;
+
+  text-align: center;
+
+  color: var(--subtle);
+
+  font-family: var(--mono);
+
+  font-size: 10px;
+}
+
+.live {
+  display: flex;
+
+  align-items: center;
+
+  gap: 5px;
+
+  color: var(--green);
+
+  font-family: var(--mono);
+
+  font-size: 8px;
+}
+
+.live span {
+  width: 5px;
+  height: 5px;
+
+  border-radius: 50%;
+
+  background: var(--green);
+
+  box-shadow: 0 0 6px var(--green);
+}
+
+
+/* =================================
+   CODE
+================================= */
+
+.code {
+  min-height: 290px;
+
+  padding: 25px 20px;
+
+  color: #d4d4d8;
+
+  font-family: var(--mono);
+
+  font-size: 12px;
+
+  line-height: 2;
+}
+
+.lineNumber {
+  display: inline-block;
+
+  width: 35px;
+
+  color: #3d3f4b;
+
+  user-select: none;
+}
+
+.purple {
+  color: #c084fc;
+}
+
+.blue {
+  color: #67e8f9;
+}
+
+.green {
+  color: #86efac;
+}
+
+
+/* =================================
+   ONLINE USERS
+================================= */
+
+.onlineUsers {
+  height: 45px;
+
+  display: flex;
+
+  align-items: center;
+
+  padding: 0 15px;
+
+  border-top: 1px solid var(--border);
+
+  color: var(--subtle);
+
+  font-size: 10px;
+}
+
+.avatar {
+  width: 23px;
+  height: 23px;
+
+  display: flex;
+
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 50%;
+
+  background: var(--purple);
+
+  border: 2px solid #0c0d13;
+
+  font-size: 9px;
+
+  color: white;
+
+  font-weight: 600;
+
+  z-index: 2;
+}
+
+.avatar.second {
+  margin-left: -6px;
+
+  background: #0891b2;
+
+  z-index: 1;
+}
+
+.onlineUsers > span:last-child {
+  margin-left: 10px;
+}
+
+
+/* =================================
+   FOOTER
+================================= */
+
+footer {
+  height: 62px;
+
+  padding: 0 6%;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  border-top: 1px solid var(--border);
+
+  color: var(--subtle);
+
+  font-size: 11px;
+}
+
+footer span:first-child {
+  color: var(--muted);
+
+  font-weight: 600;
+}
+
+
+/* =================================
+   RESPONSIVE
+================================= */
+
+@media (max-width: 850px) {
+
+  .homeMain {
+    grid-template-columns: 1fr;
+
+    max-width: 600px;
+
+    padding: 70px 25px;
+
+    gap: 50px;
+  }
+
+  .hero {
+    max-width: 100%;
+  }
+
+  .editorPreview {
+    width: 100%;
+  }
+}
+
+
+@media (max-width: 600px) {
+
+  .navbar {
+    padding: 0 20px;
+  }
+
+  .homeMain {
+    padding: 55px 20px;
+  }
+
+  .hero h1 {
+    font-size: 46px;
+
+    letter-spacing: -2px;
+  }
+
+  .description {
+    font-size: 14px;
+  }
+
+  .roomCard {
+    padding: 20px;
+  }
+
+  footer {
+    padding: 0 20px;
+
+    flex-direction: column;
+
+    justify-content: center;
+
+    gap: 5px;
+  }
+}
