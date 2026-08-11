@@ -2,6 +2,7 @@ const express = require("express");
 const http = require("http");
 const cors = require("cors");
 const { Server } = require("socket.io");
+const Y = require("yjs");
 
 const app = express();
 
@@ -12,261 +13,748 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
     cors: {
-        origin: "http://localhost:3000",
+        origin: "*",
         methods: ["GET", "POST"],
     },
 });
 
-app.get("/", (req, res) => {
-    res.send("CodeMesh server is running!");
-});
+const PORT = 5001;
+
+/*
+==================================================
+YJS ROOM DOCUMENTS
+==================================================
+*/
+
+const roomDocuments = new Map();
 
 
-io.on("connection", (socket) => {
+function getRoomDocument(roomId) {
 
-    console.log("User connected:", socket.id);
+    if (!roomDocuments.has(roomId)) {
 
+        const ydoc = new Y.Doc();
 
-    // =========================================
-    // JOIN ROOM
-    // =========================================
-
-    socket.on("join-room", ({ roomId, username }) => {
-
-        socket.join(roomId);
-
-        socket.roomId = roomId;
-        socket.username = username;
+        const ytext =
+            ydoc.getText("codemirror");
 
 
-        console.log(
-            `${username} joined room ${roomId}`
-        );
+        /*
+        Initial code for a brand-new room
+        */
 
+        ydoc.transact(() => {
 
-        // Get current users
-        const room = io.sockets.adapter.rooms.get(roomId);
+            ytext.insert(
+                0,
+`const workspace = {
+    name: "CodeMesh",
+    status: "connected"
+};
 
-        const users = [];
+function collaborate() {
+    console.log("Building together...");
+}
 
-        if (room) {
+collaborate();
+`
+            );
 
-            room.forEach((socketId) => {
-
-                const userSocket =
-                    io.sockets.sockets.get(socketId);
-
-                if (userSocket) {
-
-                    users.push({
-                        id: socketId,
-                        username: userSocket.username,
-                    });
-
-                }
-
-            });
-
-        }
-
-
-        // Send collaborator list
-        io.to(roomId).emit("room-users", {
-            users,
         });
 
 
-        // Tell this user they joined
-        socket.emit("room-joined", {
+        roomDocuments.set(
             roomId,
-            username,
-        });
-
-
-        // =======================================
-        // ACTIVITY: USER JOINED
-        // =======================================
-
-        io.to(roomId).emit("activity", {
-
-            id: `${Date.now()}-${socket.id}`,
-
-            username,
-
-            type: "join",
-
-            message: "joined the workspace",
-
-            timestamp: Date.now(),
-
-        });
-
-    });
-
-
-    // =========================================
-    // CODE CHANGE
-    // =========================================
-
-// =========================================
-// CODE CHANGE
-// =========================================
-
-// =========================================
-// CODE CHANGE
-// =========================================
-
-socket.on("code-change", ({ roomId, code }) => {
-
-    // Send code to everyone else in the room
-    socket.to(roomId).emit("code-update", {
-        code,
-    });
-
-
-    // =======================================
-    // EDIT ACTIVITY
-    // =======================================
-
-    /*
-      One activity is created for one editing
-      session.
-
-      As long as the user keeps typing,
-      no new activity is created.
-
-      If the user stops typing for 5 seconds,
-      the editing session ends.
-
-      The next edit creates a new activity.
-    */
-
-    if (!socket.isEditing) {
-
-        socket.isEditing = true;
-
-        const now = Date.now();
-
-
-        io.to(roomId).emit("activity", {
-
-            // IMPORTANT:
-            // Every editing session gets a
-            // completely unique ID.
-
-            id: `edit-${socket.id}-${now}`,
-
-            username: socket.username,
-
-            type: "edit",
-
-            message: "is editing index.js",
-
-            timestamp: now,
-
-        });
-
+            ydoc
+        );
     }
 
 
-    // =======================================
-    // RESET INACTIVITY TIMER
-    // =======================================
-
-    clearTimeout(socket.editingTimeout);
+    return roomDocuments.get(roomId);
+}
 
 
-    socket.editingTimeout = setTimeout(() => {
+/*
+==================================================
+GET ONLINE USERS
+==================================================
+*/
 
-        socket.isEditing = false;
+function getRoomUsers(roomId) {
 
-    }, 15000);
-
-});
-
-
-    // =========================================
-    // DISCONNECT
-    // =========================================
-
-    socket.on("disconnect", () => {
-
-        console.log(
-            `${socket.username || "User"} disconnected`
+    const room =
+        io.sockets.adapter.rooms.get(
+            roomId
         );
 
+    const users = [];
 
-        if (!socket.roomId) {
-            return;
-        }
+    if (!room) {
+        return users;
+    }
 
 
-        // Update collaborators
-        const room =
-            io.sockets.adapter.rooms.get(
-                socket.roomId
+    room.forEach((socketId) => {
+
+        const userSocket =
+            io.sockets.sockets.get(
+                socketId
             );
 
-        const users = [];
+        if (userSocket) {
 
-        if (room) {
+            users.push({
 
-            room.forEach((socketId) => {
+                id: socketId,
 
-                const userSocket =
-                    io.sockets.sockets.get(socketId);
-
-                if (userSocket) {
-
-                    users.push({
-                        id: socketId,
-                        username: userSocket.username,
-                    });
-
-                }
+                username:
+                    userSocket.username,
 
             });
 
         }
 
+    });
 
-        io.to(socket.roomId).emit(
-            "room-users",
-            {
-                users,
-            }
+
+    return users;
+}
+
+
+/*
+==================================================
+SEND ONLINE USERS
+==================================================
+*/
+
+function broadcastRoomUsers(roomId) {
+
+    io.to(roomId).emit(
+        "room-users",
+        {
+            users:
+                getRoomUsers(roomId),
+        }
+    );
+
+}
+
+
+/*
+==================================================
+SEND CURRENT EDITING USERS
+==================================================
+*/
+
+function broadcastEditingUsers(roomId) {
+
+    const room =
+        io.sockets.adapter.rooms.get(
+            roomId
         );
 
+    const editingUsers = [];
 
-        // =======================================
-        // ACTIVITY: USER LEFT
-        // =======================================
+    if (!room) {
+        return;
+    }
 
-        io.to(socket.roomId).emit("activity", {
 
-            id: `${Date.now()}-${socket.id}`,
+    room.forEach((socketId) => {
 
-            username: socket.username,
+        const userSocket =
+            io.sockets.sockets.get(
+                socketId
+            );
 
-            type: "leave",
+        if (
+            userSocket &&
+            userSocket.isEditing
+        ) {
 
-            message: "left the workspace",
+            editingUsers.push({
+                id: socketId,
+                username:
+                    userSocket.username,
+            });
 
-            timestamp: Date.now(),
-
-        });
+        }
 
     });
 
-});
+
+    io.to(roomId).emit(
+        "editing-users",
+        {
+            users:
+                editingUsers,
+        }
+    );
+
+}
 
 
-const PORT = 5001;
+/*
+==================================================
+HOME
+==================================================
+*/
 
-server.listen(PORT, () => {
+app.get("/", (req, res) => {
 
-    console.log(
-        `CodeMesh server running on http://localhost:${PORT}`
+    res.send(
+        "CodeMesh server is running!"
     );
 
 });
+
+
+/*
+==================================================
+SOCKET.IO
+==================================================
+*/
+
+io.on("connection", (socket) => {
+
+    console.log(
+        "User connected:",
+        socket.id
+    );
+
+
+    socket.isEditing = false;
+
+
+    /*
+    ==============================================
+    JOIN ROOM
+    ==============================================
+    */
+
+    socket.on(
+        "join-room",
+        ({ roomId, username }) => {
+
+            socket.join(roomId);
+
+            socket.roomId =
+                roomId;
+
+            socket.username =
+                username;
+
+            socket.isEditing =
+                false;
+
+
+            console.log(
+                `${username} joined room ${roomId}`
+            );
+
+
+            /*
+            ------------------------------------------
+            Get/create Yjs document
+            ------------------------------------------
+            */
+
+            const ydoc =
+                getRoomDocument(
+                    roomId
+                );
+
+
+            /*
+            ------------------------------------------
+            Send current document to this user
+            ------------------------------------------
+            */
+
+            const currentState =
+                Y.encodeStateAsUpdate(
+                    ydoc
+                );
+
+
+            socket.emit(
+                "y-sync",
+                currentState
+            );
+
+
+            /*
+            ------------------------------------------
+            Send collaborators
+            ------------------------------------------
+            */
+
+            broadcastRoomUsers(
+                roomId
+            );
+
+
+            /*
+            ------------------------------------------
+            Send current editing users
+            ------------------------------------------
+            */
+
+            broadcastEditingUsers(
+                roomId
+            );
+
+
+            /*
+            ------------------------------------------
+            Tell this user they joined
+            ------------------------------------------
+            */
+
+            socket.emit(
+                "room-joined",
+                {
+                    roomId,
+                    username,
+                }
+            );
+
+
+            /*
+            ------------------------------------------
+            JOIN ACTIVITY
+            ------------------------------------------
+            */
+
+            io.to(roomId).emit(
+                "activity",
+                {
+
+                    id:
+                        `join-${socket.id}-${Date.now()}`,
+
+                    username,
+
+                    type:
+                        "join",
+
+                    message:
+                        "joined the workspace",
+
+                    timestamp:
+                        Date.now(),
+
+                }
+            );
+
+        }
+    );
+
+
+    /*
+    ==============================================
+    YJS UPDATE
+    ==============================================
+
+    Local user:
+
+    CodeMirror
+        ↓
+    Yjs
+        ↓
+    y-update
+        ↓
+    Server
+        ↓
+    Other users
+
+    ==============================================
+    */
+
+    socket.on(
+        "y-update",
+        ({ roomId, update }) => {
+
+            if (!roomId || !update) {
+                return;
+            }
+
+
+            const ydoc =
+                getRoomDocument(
+                    roomId
+                );
+
+
+            try {
+
+                /*
+                Apply update to server
+                document.
+
+                Yjs handles conflict
+                resolution.
+                */
+
+                Y.applyUpdate(
+                    ydoc,
+                    new Uint8Array(update),
+                    socket
+                );
+
+
+                /*
+                IMPORTANT:
+
+                Send ONLY this update to
+                the other users.
+
+                We do NOT send a full
+                document.
+                */
+
+                socket
+                    .to(roomId)
+                    .emit(
+                        "y-update",
+                        update
+                    );
+
+
+            } catch (error) {
+
+                console.error(
+                    "Yjs update error:",
+                    error
+                );
+
+            }
+
+        }
+    );
+
+
+    /*
+    ==============================================
+    YJS STATE
+    ==============================================
+
+    Used when a user reconnects.
+
+    Their local Yjs document may contain
+    edits that the server doesn't have yet.
+
+    We merge that state into the server.
+    ==============================================
+    */
+
+    socket.on(
+        "y-state",
+        ({ roomId, state }) => {
+
+            if (!roomId || !state) {
+                return;
+            }
+
+
+            const ydoc =
+                getRoomDocument(
+                    roomId
+                );
+
+
+            try {
+
+                Y.applyUpdate(
+                    ydoc,
+                    new Uint8Array(state),
+                    socket
+                );
+
+
+                /*
+                Send the merged state to
+                the other users.
+                */
+
+                socket
+                    .to(roomId)
+                    .emit(
+                        "y-sync",
+                        Y.encodeStateAsUpdate(
+                            ydoc
+                        )
+                    );
+
+
+            } catch (error) {
+
+                console.error(
+                    "Yjs state error:",
+                    error
+                );
+
+            }
+
+        }
+    );
+
+
+    /*
+    ==============================================
+    EDITING START
+    ==============================================
+
+    THIS EVENT ONLY comes from the user
+    who actually typed.
+
+    Remote Yjs updates NEVER trigger this.
+    ==============================================
+    */
+
+    socket.on(
+        "edit-activity",
+        ({ roomId }) => {
+
+            if (
+                !roomId ||
+                socket.roomId !== roomId
+            ) {
+                return;
+            }
+
+
+            /*
+            Already editing?
+
+            Don't create another activity.
+            */
+
+            if (!socket.isEditing) {
+
+                socket.isEditing =
+                    true;
+
+
+                /*
+                --------------------------------------
+                LEFT PANEL
+                --------------------------------------
+                */
+
+                io.to(roomId).emit(
+                    "editing-state",
+                    {
+                        id: socket.id,
+
+                        username:
+                            socket.username,
+
+                        editing:
+                            true,
+                    }
+                );
+
+
+                /*
+                --------------------------------------
+                RIGHT ACTIVITY PANEL
+                --------------------------------------
+                */
+
+                io.to(roomId).emit(
+                    "activity",
+                    {
+
+                        id:
+                            `edit-${socket.id}-${Date.now()}`,
+
+                        username:
+                            socket.username,
+
+                        type:
+                            "edit",
+
+                        message:
+                            "is editing index.js",
+
+                        timestamp:
+                            Date.now(),
+
+                    }
+                );
+
+            }
+
+
+            /*
+            ------------------------------------------
+            RESET 5 SECOND INACTIVITY TIMER
+            ------------------------------------------
+            */
+
+            clearTimeout(
+                socket.editingTimeout
+            );
+
+
+            socket.editingTimeout =
+                setTimeout(() => {
+
+                    socket.isEditing =
+                        false;
+
+
+                    /*
+                    Tell everyone that
+                    THIS user stopped editing.
+                    */
+
+                    io.to(roomId).emit(
+                        "editing-state",
+                        {
+
+                            id:
+                                socket.id,
+
+                            username:
+                                socket.username,
+
+                            editing:
+                                false,
+
+                        }
+                    );
+
+
+                }, 5000);
+
+        }
+    );
+
+
+    /*
+    ==============================================
+    DISCONNECT
+    ==============================================
+    */
+
+    socket.on(
+        "disconnect",
+        () => {
+
+            console.log(
+                `${socket.username || "User"} disconnected`
+            );
+
+
+            clearTimeout(
+                socket.editingTimeout
+            );
+
+
+            if (!socket.roomId) {
+                return;
+            }
+
+
+            const roomId =
+                socket.roomId;
+
+
+            /*
+            If this user was editing,
+            explicitly remove their
+            editing state.
+            */
+
+            if (socket.isEditing) {
+
+                io.to(roomId).emit(
+                    "editing-state",
+                    {
+
+                        id:
+                            socket.id,
+
+                        username:
+                            socket.username,
+
+                        editing:
+                            false,
+
+                    }
+                );
+
+            }
+
+
+            /*
+            Update online users
+            */
+
+            broadcastRoomUsers(
+                roomId
+            );
+
+
+            /*
+            Update editing users
+            */
+
+            broadcastEditingUsers(
+                roomId
+            );
+
+
+            /*
+            ------------------------------------------
+            LEAVE ACTIVITY
+            ------------------------------------------
+            */
+
+            io.to(roomId).emit(
+                "activity",
+                {
+
+                    id:
+                        `leave-${socket.id}-${Date.now()}`,
+
+                    username:
+                        socket.username,
+
+                    type:
+                        "leave",
+
+                    message:
+                        "left the workspace",
+
+                    timestamp:
+                        Date.now(),
+
+                }
+            );
+
+        }
+    );
+
+});
+
+
+/*
+==================================================
+START SERVER
+==================================================
+*/
+
+server.listen(
+    PORT,
+    "0.0.0.0",
+    () => {
+
+        console.log(
+            `CodeMesh server running on http://localhost:${PORT}`
+        );
+
+    }
+);

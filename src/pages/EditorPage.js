@@ -1,35 +1,91 @@
-import React, { useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
-import toast from "react-hot-toast";
+import React, {
+    useCallback,
+    useEffect,
+    useRef,
+    useState,
+} from "react";
+
+import {
+    useLocation,
+    useNavigate,
+    useParams,
+} from "react-router-dom";
+
 import { io } from "socket.io-client";
 
-import { EditorState } from "@codemirror/state";
+import toast from "react-hot-toast";
+
+import * as Y from "yjs";
+
+import { yCollab } from "y-codemirror.next";
+
+import {
+    EditorState,
+} from "@codemirror/state";
+
 import {
     EditorView,
-    keymap,
     lineNumbers,
     highlightActiveLine,
+    keymap,
 } from "@codemirror/view";
+
 import {
     defaultKeymap,
     history,
     historyKeymap,
 } from "@codemirror/commands";
-import { javascript } from "@codemirror/lang-javascript";
-import { oneDark } from "@codemirror/theme-one-dark";
+
 import {
     autocompletion,
     closeBrackets,
     closeBracketsKeymap,
 } from "@codemirror/autocomplete";
 
+import { javascript } from "@codemirror/lang-javascript";
+
+import { oneDark } from "@codemirror/theme-one-dark";
+
 import "./EditorPage.css";
+
+
+/*
+====================================================
+SERVER URL
+====================================================
+
+If browser is:
+
+localhost:3000
+    ↓
+localhost:5001
+
+If phone is:
+
+192.168.x.x:3000
+    ↓
+192.168.x.x:5001
+
+So we don't need to manually change the IP.
+====================================================
+*/
+
+const SERVER_URL =
+    `${window.location.protocol}//${window.location.hostname}:5001`;
+
+
+/*
+====================================================
+TIME FORMATTER
+====================================================
+*/
 
 const formatTimeAgo = (timestamp) => {
 
-    const seconds = Math.floor(
-        (Date.now() - timestamp) / 1000
-    );
+    const seconds =
+        Math.floor(
+            (Date.now() - timestamp) / 1000
+        );
 
 
     if (seconds < 5) {
@@ -42,9 +98,8 @@ const formatTimeAgo = (timestamp) => {
     }
 
 
-    const minutes = Math.floor(
-        seconds / 60
-    );
+    const minutes =
+        Math.floor(seconds / 60);
 
 
     if (minutes < 60) {
@@ -52,513 +107,1089 @@ const formatTimeAgo = (timestamp) => {
     }
 
 
-    const hours = Math.floor(
-        minutes / 60
-    );
+    const hours =
+        Math.floor(minutes / 60);
 
 
-    if (hours < 24) {
-        return `${hours} hr ago`;
-    }
-
-
-    const days = Math.floor(
-        hours / 24
-    );
-
-
-    return `${days} day${days > 1 ? "s" : ""} ago`;
+    return `${hours} hr ago`;
 };
 
 
-/* =========================================
-   CODEMIRROR EDITOR
-========================================= */
+/*
+====================================================
+CODE EDITOR
+====================================================
+*/
 
 const CodeEditor = ({
-    value,
-    onChange,
-    socket,
-    roomId,
+    ytext,
+    onLocalEdit,
 }) => {
-    const editorRef = useRef(null);
-    const viewRef = useRef(null);
-    const onChangeRef = useRef(onChange);
 
-    const isRemoteUpdate = useRef(false);
+    const editorContainerRef =
+        useRef(null);
 
 
     useEffect(() => {
-        onChangeRef.current = onChange;
-    }, [onChange]);
 
+        if (
+            !editorContainerRef.current ||
+            !ytext
+        ) {
+            return;
+        }
 
-    /* =========================================
-       CREATE CODEMIRROR
-    ========================================= */
 
-    useEffect(() => {
-        if (!editorRef.current) return;
+        /*
+        ============================================
+        YJS UNDO MANAGER
+        ============================================
+        */
 
-        const startState = EditorState.create({
-            doc: value,
+        const undoManager =
+            new Y.UndoManager(
+                ytext
+            );
 
-            extensions: [
-                lineNumbers(),
 
-                highlightActiveLine(),
+        /*
+        ============================================
+        CODEMIRROR
+        ============================================
+        */
 
-                history(),
+        const state =
+            EditorState.create({
 
-                javascript(),
+                doc:
+                    ytext.toString(),
 
-                oneDark,
+                extensions: [
 
-                closeBrackets(),
+                    lineNumbers(),
 
-                autocompletion(),
+                    highlightActiveLine(),
 
-                keymap.of([
-                    ...closeBracketsKeymap,
-                    ...defaultKeymap,
-                    ...historyKeymap,
-                ]),
+                    javascript(),
 
+                    oneDark,
 
-                /* ==============================
-                   CODE CHANGE
-                ============================== */
+                    history(),
 
-                EditorView.updateListener.of((update) => {
+                    closeBrackets(),
 
-                    if (!update.docChanged) {
-                        return;
-                    }
+                    autocompletion(),
 
+                    EditorView.domEventHandlers({
 
-                    // =========================================
-                    // REMOTE CHANGE
-                    // =========================================
+                        input: () => {
 
-                    if (isRemoteUpdate.current) {
+                            onLocalEdit();
 
-                        isRemoteUpdate.current = false;
+                        },
 
-                        return;
-                    }
+                    }),
 
+                    keymap.of([
+                        ...closeBracketsKeymap,
+                        ...defaultKeymap,
+                        ...historyKeymap,
+                    ]),
 
-                    // =========================================
-                    // LOCAL CHANGE
-                    // =========================================
 
-                    const newCode =
-                        update.state.doc.toString();
+                    /*
+                    ==================================
+                    YJS ↔ CODEMIRROR
+                    ==================================
 
+                    Yjs handles the synchronization.
 
-                    // Update React state
-                    onChangeRef.current(newCode);
+                    IMPORTANT:
 
+                    We are NOT detecting editing
+                    using CodeMirror docChanged.
 
-                    // Send only LOCAL changes
-                    if (socket && roomId) {
+                    That was causing remote edits
+                    to be mistaken as local edits.
+                    */
 
-                        socket.emit("code-change", {
-                            roomId,
-                            code: newCode,
-                        });
+                    yCollab(
+                        ytext,
+                        null,
+                        {
+                            undoManager,
+                        }
+                    ),
 
-                    }
 
-                }),
+                    /*
+                    ==================================
+                    EDITOR STYLE
+                    ==================================
+                    */
 
+                    EditorView.theme({
 
-                /* ==============================
-                   EDITOR THEME
-                ============================== */
+                        "&": {
+                            height: "100%",
+                        },
 
-                EditorView.theme({
+                        ".cm-scroller": {
 
-                    "&": {
-                        height: "100%",
-                    },
+                            overflow: "auto",
 
-                    ".cm-scroller": {
-                        overflow: "auto",
+                            fontFamily:
+                                '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
 
-                        fontFamily:
-                            '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
+                            fontSize: "14px",
 
-                        fontSize: "13px",
-                    },
+                        },
 
-                    ".cm-content": {
-                        padding: "20px 0",
-                    },
+                        ".cm-content": {
 
-                    ".cm-line": {
-                        padding: "0 20px",
-                        textAlign: "left",
-                    },
+                            padding: "20px 0",
 
-                    ".cm-gutters": {
-                        backgroundColor: "#08090f",
-                        border: "none",
-                        color: "#3d3f4b",
-                    },
+                        },
 
-                    ".cm-activeLineGutter": {
-                        backgroundColor: "transparent",
-                    },
+                        ".cm-line": {
 
-                    ".cm-activeLine": {
-                        backgroundColor:
-                            "rgba(139, 92, 246, 0.04)",
-                    },
+                            padding: "0 20px",
 
-                }),
+                            textAlign: "left",
 
-            ],
-        });
+                        },
 
+                        ".cm-gutters": {
 
-        const view = new EditorView({
-            state: startState,
-            parent: editorRef.current,
-        });
+                            backgroundColor:
+                                "#08090f",
 
+                            border: "none",
 
-        viewRef.current = view;
+                            color:
+                                "#3d3f4b",
 
+                        },
 
-        return () => {
-            view.destroy();
-            viewRef.current = null;
-        };
+                        ".cm-activeLine": {
 
-    }, [socket, roomId]);
+                            backgroundColor:
+                                "rgba(139, 92, 246, 0.04)",
 
+                        },
 
-    /* =========================================
-       UPDATE EDITOR WHEN OTHER USER TYPES
-    ========================================= */
+                    }),
 
-    useEffect(() => {
-
-        const view = viewRef.current;
-
-        if (!view) return;
-
-
-        const currentValue =
-            view.state.doc.toString();
-
-
-        if (value !== currentValue) {
-
-            // Tell CodeMirror:
-            // "This change came from another user."
-
-            isRemoteUpdate.current = true;
-
-
-            view.dispatch({
-
-                changes: {
-                    from: 0,
-                    to: currentValue.length,
-                    insert: value,
-                },
+                ],
 
             });
 
-        }
 
-    }, [value]);
+        /*
+        ============================================
+        CREATE EDITOR
+        ============================================
+        */
+
+        const view =
+            new EditorView({
+
+                state,
+
+                parent:
+                    editorContainerRef.current,
+
+            });
+
+
+        /*
+        ============================================
+        CLEANUP
+        ============================================
+        */
+
+        return () => {
+
+            view.destroy();
+
+            undoManager.destroy();
+
+        };
+
+    }, [ytext]);
 
 
     return (
+
         <div
-            ref={editorRef}
+            ref={editorContainerRef}
             className="codeMirrorWrapper"
         />
+
     );
 };
 
 
-/* =========================================
-   EDITOR PAGE
-========================================= */
+/*
+====================================================
+EDITOR PAGE
+====================================================
+*/
 
 const EditorPage = () => {
 
-    const { roomId } = useParams();
-
-    const location = useLocation();
-
-    const navigate = useNavigate();
-
-    const [, setCurrentTime] = useState(Date.now());
-
-    useEffect(() => {
-
-        const timer = setInterval(() => {
-
-            setCurrentTime(Date.now());
-
-        }, 1000);
+    const {
+        roomId,
+    } = useParams();
 
 
-        return () => {
-            clearInterval(timer);
-        };
+    const location =
+        useLocation();
 
-    }, []);
+
+    const navigate =
+        useNavigate();
+
+
+    /*
+    ================================================
+    USERNAME
+    ================================================
+    */
 
     const username =
-        location.state?.username || "Guest";
+        location.state?.username ||
+        "Guest";
 
 
-    /* =========================================
-       SOCKET STATE
-    ========================================= */
+    /*
+    ================================================
+    SOCKET
+    ================================================
+    */
 
-    const [socket, setSocket] = useState(null);
-
-    const [collaborators, setCollaborators] = useState([]);
-
-    const [activities, setActivities] = useState([]);
+    const socketRef =
+        useRef(null);
 
 
-    /* =========================================
-       CODE STATE
-    ========================================= */
+    /*
+    ================================================
+    YJS DOCUMENT
+    ================================================
+    */
 
-    const [code, setCode] = useState(
-        `const workspace = {
-  name: "CodeMesh",
-  status: "connected"
-};
+    const ydocRef =
+        useRef(null);
 
-function collaborate() {
-  console.log("Building together...");
-}
 
-collaborate();`
+    /*
+    ================================================
+    SHARED TEXT
+    ================================================
+    */
+
+    const [
+        ytext,
+        setYtext
+    ] = useState(null);
+
+
+    /*
+    ================================================
+    COLLABORATORS
+    ================================================
+    */
+
+    const [
+        collaborators,
+        setCollaborators
+    ] = useState([]);
+
+
+    /*
+    ================================================
+    WHO IS ACTUALLY EDITING
+    ================================================
+    */
+
+    const [
+        editingUsers,
+        setEditingUsers
+    ] = useState({});
+
+
+    /*
+    ================================================
+    LIVE ACTIVITY
+    ================================================
+    */
+
+    const [
+        activities,
+        setActivities
+    ] = useState([]);
+
+
+    /*
+    ================================================
+    CONNECTION STATUS
+    ================================================
+    */
+
+    const [
+        connectionStatus,
+        setConnectionStatus
+    ] = useState(
+        "Connecting"
     );
 
 
-    const [language, setLanguage] =
-        useState("JavaScript");
+    /*
+    ================================================
+    LANGUAGE
+    ================================================
+    */
+
+    const [
+        language,
+        setLanguage
+    ] = useState(
+        "JavaScript"
+    );
 
 
-    /* =========================================
-       SOCKET.IO CONNECTION
-    ========================================= */
+    /*
+    ================================================
+    LOCAL EDITING TIMER
+    ================================================
+    */
+
+    const editingTimer =
+        useRef(null);
+
+
+    const localEditing =
+        useRef(false);
+
+
+    /*
+    ================================================
+    LOCAL EDIT HANDLER
+    ================================================
+
+    This is called ONLY when the current user's
+    Yjs document produces a LOCAL update.
+
+    It is NOT called for remote updates.
+    ================================================
+    */
+
+    const handleLocalEdit =
+        useCallback(() => {
+
+            const socket =
+                socketRef.current;
+
+
+            if (!socket) {
+                return;
+            }
+
+
+            /*
+            ----------------------------------------
+            START EDITING SESSION
+            ----------------------------------------
+            */
+
+            if (
+                !localEditing.current
+            ) {
+
+                localEditing.current =
+                    true;
+
+
+                /*
+                Tell server:
+
+                THIS user is actually typing.
+                */
+
+                socket.emit(
+                    "edit-activity",
+                    {
+                        roomId,
+                    }
+                );
+
+            }
+
+
+            /*
+            ----------------------------------------
+            RESET LOCAL TIMER
+            ----------------------------------------
+            */
+
+            clearTimeout(
+                editingTimer.current
+            );
+
+
+            /*
+            If no local typing for 5 seconds,
+            this user's editing session ends.
+            */
+
+            editingTimer.current =
+                setTimeout(() => {
+
+                    localEditing.current =
+                        false;
+
+                }, 5000);
+
+        }, [roomId]);
+
+
+    /*
+    ================================================
+    MAIN SOCKET + YJS EFFECT
+    ================================================
+    */
 
     useEffect(() => {
 
-        console.log(
-            "Connecting to CodeMesh server..."
-        );
+        /*
+        ============================================
+        CREATE SOCKET
+        ============================================
+        */
 
+        const socket =
+            io(
+                SERVER_URL,
+                {
 
-        const newSocket =
-            io("http://localhost:5001");
+                    transports: [
+                        "websocket",
+                        "polling",
+                    ],
 
+                    reconnection:
+                        true,
 
-        setSocket(newSocket);
+                    reconnectionAttempts:
+                        Infinity,
 
+                    reconnectionDelay:
+                        1000,
 
-        /* ==============================
-           CONNECTED
-        ============================== */
+                    reconnectionDelayMax:
+                        5000,
 
-        newSocket.on("connect", () => {
-
-            console.log(
-                "Connected to CodeMesh server:",
-                newSocket.id
+                }
             );
 
 
-            /* Join room */
-
-            newSocket.emit("join-room", {
-                roomId,
-                username,
-            });
-
-        });
+        socketRef.current =
+            socket;
 
 
-        /* ==============================
-           ROOM JOINED
-        ============================== */
+        /*
+        ============================================
+        CREATE YJS DOCUMENT
+        ============================================
+        */
 
-        newSocket.on(
-            "room-joined",
-            (data) => {
+        const ydoc =
+            new Y.Doc();
 
-                console.log(
-                    "Successfully joined room:",
-                    data.roomId
-                );
 
-                toast.success(
-                    "Joined workspace"
-                );
-
-            }
-        );
-        newSocket.on("room-users", (data) => {
-
-            console.log(
-                "Users in room:",
-                data.users
+        const sharedText =
+            ydoc.getText(
+                "codemirror"
             );
 
-            setCollaborators(data.users);
 
-        });
-
-
-        /* ==============================
-           RECEIVE CODE
-        ============================== */
-
-        newSocket.on(
-            "code-update",
-            (data) => {
-
-                console.log(
-                    "Received code update"
-                );
+        ydocRef.current =
+            ydoc;
 
 
-                setCode(data.code);
-
-            }
+        setYtext(
+            sharedText
         );
 
-        newSocket.on("activity", (activity) => {
 
-            setActivities((prev) => {
+        /*
+        ============================================
+        LOCAL YJS UPDATE
+        ============================================
 
-                // Prevent duplicate activities
+        THIS is the important part.
+
+        When THIS user types:
+
+        CodeMirror
+             ↓
+        Yjs
+             ↓
+        ydoc "update"
+             ↓
+        origin is local
+             ↓
+        send to server
+             ↓
+        activity for THIS user
+        ============================================
+        */
+
+        const handleYUpdate =
+            (
+                update,
+                origin
+            ) => {
+
+                /*
+                ====================================
+                REMOTE UPDATE
+                ====================================
+
+                Another user typed.
+
+                We apply the update to our
+                document, but we MUST NOT:
+
+                ❌ send it again
+                ❌ mark ourselves editing
+                ❌ create activity
+                */
+
                 if (
-                    prev.some(
-                        (item) => item.id === activity.id
-                    )
+                    origin === "remote"
                 ) {
-                    return prev;
+
+                    return;
+
                 }
 
-                return [
-                    activity,
-                    ...prev,
-                ].slice(0, 8);
 
-            });
+                /*
+                ====================================
+                LOCAL UPDATE
+                ====================================
 
-        });
+                This update came from THIS user's
+                editor.
+
+                Therefore:
+
+                ✅ send update
+                ✅ mark THIS user editing
+                ====================================
+                */
+
+                socket.emit(
+                    "y-update",
+                    {
+
+                        roomId,
+
+                        update,
+
+                    }
+                );
 
 
-        /* ==============================
-           CONNECTION ERROR
-        ============================== */
+                /*
+                IMPORTANT:
 
-        newSocket.on(
+                Only the actual local editor
+                reaches this line.
+                */
+
+                handleLocalEdit();
+
+            };
+
+
+        /*
+        Listen for Yjs changes.
+        */
+
+        ydoc.on(
+            "update",
+            handleYUpdate
+        );
+
+
+        /*
+        ============================================
+        RECEIVE REMOTE YJS UPDATE
+        ============================================
+        */
+
+        const handleRemoteUpdate =
+            (update) => {
+
+                try {
+
+                    /*
+                    IMPORTANT:
+
+                    origin = "remote"
+
+                    Therefore when Yjs fires
+                    its update event, our
+                    handleYUpdate() sees:
+
+                    origin === "remote"
+
+                    and returns.
+
+                    So the receiving user is
+                    NOT marked as editing.
+                    */
+
+                    Y.applyUpdate(
+                        ydoc,
+
+                        new Uint8Array(
+                            update
+                        ),
+
+                        "remote"
+                    );
+
+                } catch (error) {
+
+                    console.error(
+                        "Remote Yjs update error:",
+                        error
+                    );
+
+                }
+
+            };
+
+
+        socket.on(
+            "y-update",
+            handleRemoteUpdate
+        );
+
+
+        /*
+        ============================================
+        RECEIVE INITIAL ROOM STATE
+        ============================================
+        */
+
+        const handleYSync =
+            (update) => {
+
+                try {
+
+                    Y.applyUpdate(
+                        ydoc,
+
+                        new Uint8Array(
+                            update
+                        ),
+
+                        "remote"
+                    );
+
+                } catch (error) {
+
+                    console.error(
+                        "Yjs sync error:",
+                        error
+                    );
+
+                }
+
+            };
+
+
+        socket.on(
+            "y-sync",
+            handleYSync
+        );
+
+
+        /*
+        ============================================
+        SOCKET CONNECTED
+        ============================================
+        */
+
+        socket.on(
+            "connect",
+            () => {
+
+                console.log(
+                    "Connected to CodeMesh:",
+                    socket.id
+                );
+
+
+                setConnectionStatus(
+                    "Connected"
+                );
+
+
+                /*
+                Join room.
+                */
+
+                socket.emit(
+                    "join-room",
+                    {
+
+                        roomId,
+
+                        username,
+
+                    }
+                );
+
+            }
+        );
+
+
+        /*
+        ============================================
+        SOCKET DISCONNECTED
+        ============================================
+        */
+
+        socket.on(
+            "disconnect",
+            () => {
+
+                console.log(
+                    "Disconnected from CodeMesh"
+                );
+
+
+                setConnectionStatus(
+                    "Reconnecting"
+                );
+
+
+                /*
+                Local editing session must reset.
+                */
+
+                localEditing.current =
+                    false;
+
+            }
+        );
+
+
+        /*
+        ============================================
+        CONNECTION ERROR
+        ============================================
+        */
+
+        socket.on(
             "connect_error",
             (error) => {
 
                 console.error(
-                    "Socket connection error:",
-                    error
+                    "Connection error:",
+                    error.message
                 );
 
-                toast.error(
-                    "Could not connect to server"
+
+                setConnectionStatus(
+                    "Reconnecting"
                 );
 
             }
         );
 
 
-        /* ==============================
-           CLEANUP
-        ============================== */
+        /*
+        ============================================
+        ROOM USERS
+        ============================================
+        */
+
+        socket.on(
+            "room-users",
+            ({ users }) => {
+
+                setCollaborators(
+                    users
+                );
+
+            }
+        );
+
+
+        /*
+        ============================================
+        EDITING STATE
+        ============================================
+
+        Server tells us EXACTLY which socket
+        is currently editing.
+
+        Example:
+
+        {
+            "abc123": true
+        }
+
+        means only abc123 is editing.
+        ============================================
+        */
+
+        socket.on(
+            "editing-state",
+            ({
+                id,
+                editing,
+            }) => {
+
+                setEditingUsers(
+                    (previous) => {
+
+                        const next = {
+                            ...previous,
+                        };
+
+
+                        if (editing) {
+
+                            next[id] =
+                                true;
+
+                        } else {
+
+                            delete next[id];
+
+                        }
+
+
+                        return next;
+
+                    }
+                );
+
+            }
+        );
+
+
+        /*
+        ============================================
+        INITIAL EDITING USERS
+        ============================================
+        */
+
+        socket.on(
+            "editing-users",
+            ({ users }) => {
+
+                const editingMap =
+                    {};
+
+
+                users.forEach(
+                    (user) => {
+
+                        editingMap[
+                            user.id
+                        ] = true;
+
+                    }
+                );
+
+
+                setEditingUsers(
+                    editingMap
+                );
+
+            }
+        );
+
+
+        /*
+        ============================================
+        ACTIVITY
+        ============================================
+        */
+
+        socket.on(
+            "activity",
+            (activity) => {
+
+                setActivities(
+                    (previous) => {
+
+                        /*
+                        Prevent duplicate events.
+                        */
+
+                        if (
+                            previous.some(
+                                (item) =>
+                                    item.id ===
+                                    activity.id
+                            )
+                        ) {
+
+                            return previous;
+
+                        }
+
+
+                        return [
+                            activity,
+                            ...previous,
+                        ].slice(
+                            0,
+                            8
+                        );
+
+                    }
+                );
+
+            }
+        );
+
+
+        /*
+        ============================================
+        CLEANUP
+        ============================================
+        */
 
         return () => {
 
-            console.log(
-                "Disconnecting from server..."
+            clearTimeout(
+                editingTimer.current
             );
 
 
-            newSocket.disconnect();
+            ydoc.off(
+                "update",
+                handleYUpdate
+            );
 
-            setSocket(null);
+
+            socket.off(
+                "y-update",
+                handleRemoteUpdate
+            );
+
+
+            socket.off(
+                "y-sync",
+                handleYSync
+            );
+
+
+            socket.disconnect();
+
+
+            ydoc.destroy();
+
+
+            socketRef.current =
+                null;
+
+
+            ydocRef.current =
+                null;
+
+
+            setYtext(
+                null
+            );
 
         };
 
-    }, [roomId, username]);
+    }, [
+        roomId,
+        username,
+        handleLocalEdit,
+    ]);
 
 
-    /* =========================================
-       COPY ROOM ID
-    ========================================= */
+    /*
+    ================================================
+    COPY ROOM ID
+    ================================================
+    */
 
-    const handleCopyRoom = async () => {
+    const handleCopyRoom =
+        async () => {
 
-        try {
+            try {
 
-            await navigator.clipboard.writeText(
-                roomId
-            );
+                await navigator
+                    .clipboard
+                    .writeText(
+                        roomId
+                    );
+
+
+                toast.success(
+                    "Room ID copied"
+                );
+
+            } catch {
+
+                toast.error(
+                    "Unable to copy room ID"
+                );
+
+            }
+
+        };
+
+
+    /*
+    ================================================
+    LEAVE
+    ================================================
+    */
+
+    const handleLeave =
+        () => {
+
+            navigate("/");
+
+        };
+
+
+    /*
+    ================================================
+    RUN
+    ================================================
+    */
+
+    const handleRun =
+        () => {
 
             toast.success(
-                "Room ID copied"
+                "Code execution coming soon"
             );
 
-        } catch {
-
-            toast.error(
-                "Unable to copy room ID"
-            );
-
-        }
-
-    };
+        };
 
 
-    /* =========================================
-       LEAVE ROOM
-    ========================================= */
-
-    const handleLeave = () => {
-
-        navigate("/");
-
-    };
-
-
-    /* =========================================
-       RUN CODE
-    ========================================= */
-
-    const handleRun = () => {
-
-        toast.success(
-            "Code execution coming soon"
-        );
-
-    };
-
-
-    /* =========================================
-       UI
-    ========================================= */
+    /*
+    ================================================
+    RENDER
+    ================================================
+    */
 
     return (
 
@@ -566,8 +1197,8 @@ collaborate();`
 
 
             {/* =====================================
-          NAVBAR
-      ===================================== */}
+                NAVBAR
+            ===================================== */}
 
             <header className="editorNavbar">
 
@@ -592,10 +1223,12 @@ collaborate();`
                         ROOM
                     </span>
 
+
                     <button
                         className="roomIdButton"
-                        onClick={handleCopyRoom}
-                        title="Copy room ID"
+                        onClick={
+                            handleCopyRoom
+                        }
                     >
 
                         {roomId}
@@ -611,20 +1244,34 @@ collaborate();`
 
                 <div className="editorNavRight">
 
-                    <div className="connectionStatus">
+                    <div
+                        className={
+                            "connectionStatus " +
+                            (
+                                connectionStatus ===
+                                    "Connected"
+                                    ? "connected"
+                                    : "reconnecting"
+                            )
+                        }
+                    >
 
-                        <span></span>
+                        <span />
 
-                        Connected
+                        {connectionStatus}
 
                     </div>
 
 
                     <button
                         className="leaveButton"
-                        onClick={handleLeave}
+                        onClick={
+                            handleLeave
+                        }
                     >
+
                         Leave
+
                     </button>
 
                 </div>
@@ -633,20 +1280,20 @@ collaborate();`
 
 
             {/* =====================================
-          MAIN EDITOR LAYOUT
-      ===================================== */}
+                MAIN
+            ===================================== */}
 
             <div className="editorLayout">
 
 
-                {/* =====================================
-            LEFT SIDEBAR
-        ===================================== */}
+                {/* =================================
+                    LEFT SIDEBAR
+                ================================= */}
 
                 <aside className="editorSidebar">
 
 
-                    {/* Explorer */}
+                    {/* EXPLORER */}
 
                     <div className="sidebarSection">
 
@@ -656,7 +1303,7 @@ collaborate();`
                                 EXPLORER
                             </span>
 
-                            <button title="New file">
+                            <button>
                                 +
                             </button>
 
@@ -672,7 +1319,9 @@ collaborate();`
                             className="fileItem active"
                         >
 
-                            <span className="fileIcon js">
+                            <span
+                                className="fileIcon js"
+                            >
                                 JS
                             </span>
 
@@ -681,9 +1330,14 @@ collaborate();`
                         </button>
 
 
-                        <button className="fileItem">
+                        <button
+                            className="fileItem"
+                            disabled
+                        >
 
-                            <span className="fileIcon md">
+                            <span
+                                className="fileIcon md"
+                            >
                                 #
                             </span>
 
@@ -694,7 +1348,7 @@ collaborate();`
                     </div>
 
 
-                    {/* Collaborators */}
+                    {/* COLLABORATORS */}
 
                     <div className="sidebarSection">
 
@@ -704,58 +1358,113 @@ collaborate();`
                                 COLLABORATORS
                             </span>
 
+
                             <span className="onlineCount">
-                                {collaborators.length}
+
+                                {
+                                    collaborators.length
+                                }
+
                             </span>
 
                         </div>
 
 
-                        {collaborators.map((user) => (
+                        {
+                            collaborators.map(
+                                (user) => {
 
-                            <div
-                                className="userItem"
-                                key={user.id}
-                            >
-
-                                <div
-                                    className={
-                                        "userAvatar " +
-                                        (user.id === socket?.id
-                                            ? "purpleAvatar"
-                                            : "blueAvatar")
-                                    }
-                                >
-                                    {user.username
-                                        ?.charAt(0)
-                                        .toUpperCase()}
-                                </div>
+                                    const isEditing =
+                                        Boolean(
+                                            editingUsers[
+                                            user.id
+                                            ]
+                                        );
 
 
-                                <div className="userDetails">
-
-                                    <span>
-                                        {user.username}
-                                    </span>
-
-                                    <small>
-                                        {user.id === socket?.id
-                                            ? "You"
-                                            : "Editing"}
-                                    </small>
-
-                                </div>
+                                    const isMe =
+                                        user.id ===
+                                        socketRef
+                                            .current
+                                            ?.id;
 
 
-                                <span className="userOnline"></span>
+                                    return (
 
-                            </div>
+                                        <div
+                                            className="userItem"
+                                            key={
+                                                user.id
+                                            }
+                                        >
 
-                        ))}
+                                            <div
+                                                className={
+                                                    "userAvatar " +
+                                                    (
+                                                        isMe
+                                                            ? "purpleAvatar"
+                                                            : "blueAvatar"
+                                                    )
+                                                }
+                                            >
+
+                                                {
+                                                    user.username
+                                                        ?.charAt(0)
+                                                        .toUpperCase()
+                                                }
+
+                                            </div>
+
+
+                                            <div className="userDetails">
+
+                                                <span>
+
+                                                    {
+                                                        user.username
+                                                    }
+
+                                                </span>
+
+
+                                                <small>
+
+                                                    {
+                                                        isMe
+                                                            ? "You"
+                                                            : "Online"
+                                                    }
+
+                                                </small>
+
+                                            </div>
+
+
+                                            <span
+                                                className={
+                                                    "userOnline " +
+                                                    (
+                                                        isEditing
+                                                            ? "editingDot"
+                                                            : ""
+                                                    )
+                                                }
+                                            />
+
+                                        </div>
+
+                                    );
+
+                                }
+                            )
+                        }
 
                     </div>
 
-                    {/* Workspace */}
+
+                    {/* WORKSPACE */}
 
                     <div className="sidebarBottom">
 
@@ -765,9 +1474,11 @@ collaborate();`
                                 WORKSPACE
                             </span>
 
+
                             <strong>
                                 CodeMesh Room
                             </strong>
+
 
                             <span className="smallRoomId">
                                 {roomId}
@@ -780,17 +1491,16 @@ collaborate();`
                 </aside>
 
 
-                {/* =====================================
-            MAIN EDITOR
-        ===================================== */}
+                {/* =================================
+                    MAIN EDITOR
+                ================================= */}
 
                 <main className="editorMain">
 
 
-                    {/* Toolbar */}
+                    {/* TOOLBAR */}
 
                     <div className="editorToolbar">
-
 
                         <div className="activeTab">
 
@@ -809,11 +1519,15 @@ collaborate();`
 
                         <div className="toolbarRight">
 
-
                             <select
-                                value={language}
-                                onChange={(e) =>
-                                    setLanguage(e.target.value)
+                                value={
+                                    language
+                                }
+                                onChange={
+                                    (event) =>
+                                        setLanguage(
+                                            event.target.value
+                                        )
                                 }
                                 className="languageSelect"
                             >
@@ -843,9 +1557,13 @@ collaborate();`
 
                             <button
                                 className="runButton"
-                                onClick={handleRun}
+                                onClick={
+                                    handleRun
+                                }
                             >
+
                                 ▶ Run
+
                             </button>
 
                         </div>
@@ -853,32 +1571,29 @@ collaborate();`
                     </div>
 
 
-                    {/* =================================
-              CODEMIRROR
-          ================================= */}
+                    {/* CODE */}
 
                     <div className="codeEditor">
 
-                        <CodeEditor
-                            value={code}
-                            onChange={setCode}
-                            socket={socket}
-                            roomId={roomId}
-                        />
+                        {
+                            ytext && (
+
+                                <CodeEditor
+                                    ytext={ytext}
+                                    onLocalEdit={handleLocalEdit}
+                                />
+
+                            )
+                        }
 
                     </div>
 
 
-                    {/* Status bar */}
+                    {/* STATUS BAR */}
 
                     <div className="editorStatusBar">
 
-
                         <div className="statusLeft">
-
-                            <span>
-                                Ln 1, Col 1
-                            </span>
 
                             <span>
                                 UTF-8
@@ -900,9 +1615,14 @@ collaborate();`
 
                             <span className="syncStatus">
 
-                                <span></span>
+                                <span />
 
-                                Synced
+                                {
+                                    connectionStatus ===
+                                        "Connected"
+                                        ? "Synced"
+                                        : connectionStatus
+                                }
 
                             </span>
 
@@ -913,9 +1633,9 @@ collaborate();`
                 </main>
 
 
-                {/* =====================================
-            RIGHT PANEL
-        ===================================== */}
+                {/* =================================
+                    RIGHT ACTIVITY PANEL
+                ================================= */}
 
                 <aside className="rightPanel">
 
@@ -924,6 +1644,7 @@ collaborate();`
                         <span>
                             LIVE ACTIVITY
                         </span>
+
 
                         <span className="liveBadge">
                             LIVE
@@ -934,79 +1655,102 @@ collaborate();`
 
                     <div className="activityList">
 
-                        {activities.length === 0 ? (
+                        {
+                            activities.length === 0
+                                ? (
 
-                            <div className="emptyActivity">
+                                    <div className="emptyActivity">
 
-                                <span>
-                                    No activity yet
-                                </span>
-
-                                <small>
-                                    Activity will appear here
-                                </small>
-
-                            </div>
-
-                        ) : (
-
-                            activities.map((activity) => (
-
-                                <div
-                                    className="activityItem"
-                                    key={activity.id}
-                                >
-
-                                    <div
-                                        className={
-                                            "activityAvatar " +
-                                            (
-                                                activity.type === "leave"
-                                                    ? "leaveAvatar"
-                                                    : activity.username === username
-                                                        ? "purpleAvatar"
-                                                        : "blueAvatar"
-                                            )
-                                        }
-                                    >
-
-                                        {activity.username
-                                            ?.charAt(0)
-                                            .toUpperCase()}
-
-                                    </div>
-
-
-                                    <div className="activityContent">
-
-                                        <strong>
-                                            {activity.username === username
-                                                ? "You"
-                                                : activity.username}
-                                        </strong>
-
-
-                                        <p>
-                                            {activity.message}
-                                        </p>
-
+                                        <span>
+                                            No activity yet
+                                        </span>
 
                                         <small>
-                                            {formatTimeAgo(activity.timestamp)}
+                                            Activity will appear here
                                         </small>
 
                                     </div>
 
-                                </div>
+                                )
+                                : (
 
-                            ))
+                                    activities.map(
+                                        (activity) => (
 
-                        )}
+                                            <div
+                                                className="activityItem"
+                                                key={
+                                                    activity.id
+                                                }
+                                            >
+
+                                                <div
+                                                    className={
+                                                        "activityAvatar " +
+                                                        (
+                                                            activity.type ===
+                                                                "leave"
+                                                                ? "leaveAvatar"
+                                                                : activity.username ===
+                                                                    username
+                                                                    ? "purpleAvatar"
+                                                                    : "blueAvatar"
+                                                        )
+                                                    }
+                                                >
+
+                                                    {
+                                                        activity.username
+                                                            ?.charAt(0)
+                                                            .toUpperCase()
+                                                    }
+
+                                                </div>
+
+
+                                                <div className="activityContent">
+
+                                                    <strong>
+
+                                                        {
+                                                            activity.username ===
+                                                                username
+                                                                ? "You"
+                                                                : activity.username
+                                                        }
+
+                                                    </strong>
+
+
+                                                    <p>
+                                                        {
+                                                            activity.message
+                                                        }
+                                                    </p>
+
+
+                                                    <small>
+                                                        {
+                                                            formatTimeAgo(
+                                                                activity.timestamp
+                                                            )
+                                                        }
+                                                    </small>
+
+                                                </div>
+
+                                            </div>
+
+                                        )
+                                    )
+
+                                )
+                        }
 
                     </div>
 
 
-                    <div className="panelDivider"></div>
+                    <div className="panelDivider" />
 
 
                     <div className="panelInfo">
@@ -1022,9 +1766,9 @@ collaborate();`
 
 
                         <p>
-                            Changes made in this editor
-                            synchronize with everyone
-                            in the same room.
+                            Changes are synchronized
+                            using a CRDT-based
+                            shared document.
                         </p>
 
                     </div>
@@ -1036,7 +1780,6 @@ collaborate();`
         </div>
 
     );
-
 };
 
 
