@@ -21,10 +21,14 @@ import { yCollab } from "y-codemirror.next";
 
 import {
     EditorState,
+    StateEffect,
+    StateField,
 } from "@codemirror/state";
 
 import {
     EditorView,
+    Decoration,
+    WidgetType,
     lineNumbers,
     highlightActiveLine,
     keymap,
@@ -53,21 +57,6 @@ import "./EditorPage.css";
 ====================================================
 SERVER URL
 ====================================================
-
-If browser is:
-
-localhost:3000
-    ↓
-localhost:5001
-
-If phone is:
-
-192.168.x.x:3000
-    ↓
-192.168.x.x:5001
-
-So we don't need to manually change the IP.
-====================================================
 */
 
 const SERVER_URL =
@@ -76,42 +65,366 @@ const SERVER_URL =
 
 /*
 ====================================================
+CURSOR COLORS
+====================================================
+*/
+
+const CURSOR_COLORS = [
+    "#8b5cf6",
+    "#06b6d4",
+    "#f59e0b",
+    "#ef4444",
+    "#22c55e",
+    "#ec4899",
+    "#3b82f6",
+];
+
+
+function getCursorColor(id) {
+
+    let hash = 0;
+
+    for (
+        let i = 0;
+        i < id.length;
+        i++
+    ) {
+
+        hash =
+            (
+                hash * 31 +
+                id.charCodeAt(i)
+            ) >>> 0;
+
+    }
+
+
+    return CURSOR_COLORS[
+        hash %
+        CURSOR_COLORS.length
+    ];
+
+}
+
+
+/*
+====================================================
+REMOTE CURSOR WIDGET
+====================================================
+*/
+
+class RemoteCursorWidget
+    extends WidgetType {
+
+    constructor(
+        username,
+        color
+    ) {
+
+        super();
+
+        this.username =
+            username;
+
+        this.color =
+            color;
+
+    }
+
+
+    eq(other) {
+
+        return (
+            other.username ===
+                this.username &&
+            other.color ===
+                this.color
+        );
+
+    }
+
+
+    toDOM() {
+
+        const wrapper =
+            document.createElement(
+                "span"
+            );
+
+
+        wrapper.className =
+            "remoteCursorWrapper";
+
+
+        wrapper.style.setProperty(
+            "--cursor-color",
+            this.color
+        );
+
+
+        const cursor =
+            document.createElement(
+                "span"
+            );
+
+
+        cursor.className =
+            "remoteCursorLine";
+
+
+        const label =
+            document.createElement(
+                "span"
+            );
+
+
+        label.className =
+            "remoteCursorLabel";
+
+
+        label.textContent =
+            this.username;
+
+
+        wrapper.appendChild(
+            cursor
+        );
+
+
+        wrapper.appendChild(
+            label
+        );
+
+
+        return wrapper;
+
+    }
+
+
+    ignoreEvent() {
+
+        return true;
+
+    }
+
+}
+
+
+/*
+====================================================
+REMOTE CURSOR STATE EFFECT
+====================================================
+*/
+
+const remoteCursorEffect =
+    StateEffect.define();
+
+
+/*
+====================================================
+REMOTE CURSOR STATE FIELD
+====================================================
+*/
+
+const remoteCursorField =
+    StateField.define({
+
+        create() {
+
+            return [];
+
+        },
+
+
+        update(
+            cursors,
+            transaction
+        ) {
+
+            /*
+            ----------------------------------------
+            Move existing remote cursors when
+            document changes.
+            ----------------------------------------
+            */
+
+            cursors =
+                cursors.map(
+                    (cursor) => ({
+
+                        ...cursor,
+
+                        position:
+                            transaction
+                                .changes
+                                .mapPos(
+                                    cursor.position
+                                ),
+
+                    })
+                );
+
+
+            /*
+            ----------------------------------------
+            Handle cursor effects.
+            ----------------------------------------
+            */
+
+            for (
+                const effect
+                of transaction.effects
+            ) {
+
+                if (
+                    effect.is(
+                        remoteCursorEffect
+                    )
+                ) {
+
+                    const data =
+                        effect.value;
+
+
+                    /*
+                    Remove existing
+                    cursor for this user.
+                    */
+
+                    cursors =
+                        cursors.filter(
+                            (cursor) =>
+                                cursor.id !==
+                                data.id
+                        );
+
+
+                    /*
+                    Add new cursor.
+                    */
+
+                    if (
+                        !data.remove
+                    ) {
+
+                        cursors.push(
+                            data
+                        );
+
+                    }
+
+                }
+
+            }
+
+
+            return cursors;
+
+        },
+
+
+        provide:
+            (field) =>
+                EditorView.decorations.from(
+                    field,
+                    (cursors) => {
+
+                        const decorations =
+                            cursors.map(
+                                (cursor) => {
+
+                                    return Decoration
+                                        .widget({
+
+                                            widget:
+                                                new RemoteCursorWidget(
+                                                    cursor.username,
+                                                    cursor.color
+                                                ),
+
+                                            side:
+                                                1,
+
+                                        })
+                                        .range(
+                                            cursor.position
+                                        );
+
+                                }
+                            );
+
+
+                        return Decoration.set(
+                            decorations,
+                            true
+                        );
+
+                    }
+                ),
+
+    });
+
+
+/*
+====================================================
 TIME FORMATTER
 ====================================================
 */
 
-const formatTimeAgo = (timestamp) => {
+const formatTimeAgo = (
+    timestamp
+) => {
 
     const seconds =
         Math.floor(
-            (Date.now() - timestamp) / 1000
+            (
+                Date.now() -
+                timestamp
+            ) / 1000
         );
 
 
-    if (seconds < 5) {
+    if (
+        seconds < 5
+    ) {
+
         return "just now";
+
     }
 
 
-    if (seconds < 60) {
+    if (
+        seconds < 60
+    ) {
+
         return `${seconds} sec ago`;
+
     }
 
 
     const minutes =
-        Math.floor(seconds / 60);
+        Math.floor(
+            seconds / 60
+        );
 
 
-    if (minutes < 60) {
+    if (
+        minutes < 60
+    ) {
+
         return `${minutes} min ago`;
+
     }
 
 
     const hours =
-        Math.floor(minutes / 60);
+        Math.floor(
+            minutes / 60
+        );
 
 
     return `${hours} hr ago`;
+
 };
 
 
@@ -124,6 +437,8 @@ CODE EDITOR
 const CodeEditor = ({
     ytext,
     onLocalEdit,
+    onCursorChange,
+    onEditorReady,
 }) => {
 
     const editorContainerRef =
@@ -136,13 +451,15 @@ const CodeEditor = ({
             !editorContainerRef.current ||
             !ytext
         ) {
+
             return;
+
         }
 
 
         /*
         ============================================
-        YJS UNDO MANAGER
+        UNDO MANAGER
         ============================================
         */
 
@@ -154,7 +471,7 @@ const CodeEditor = ({
 
         /*
         ============================================
-        CODEMIRROR
+        CODEMIRROR STATE
         ============================================
         */
 
@@ -180,15 +497,6 @@ const CodeEditor = ({
 
                     autocompletion(),
 
-                    EditorView.domEventHandlers({
-
-                        input: () => {
-
-                            onLocalEdit();
-
-                        },
-
-                    }),
 
                     keymap.of([
                         ...closeBracketsKeymap,
@@ -198,19 +506,9 @@ const CodeEditor = ({
 
 
                     /*
-                    ==================================
-                    YJS ↔ CODEMIRROR
-                    ==================================
-
-                    Yjs handles the synchronization.
-
-                    IMPORTANT:
-
-                    We are NOT detecting editing
-                    using CodeMirror docChanged.
-
-                    That was causing remote edits
-                    to be mistaken as local edits.
+                    --------------------------------
+                    YJS COLLABORATION
+                    --------------------------------
                     */
 
                     yCollab(
@@ -223,39 +521,117 @@ const CodeEditor = ({
 
 
                     /*
-                    ==================================
-                    EDITOR STYLE
-                    ==================================
+                    --------------------------------
+                    REMOTE CURSORS
+                    --------------------------------
+                    */
+
+                    remoteCursorField,
+
+
+                    /*
+                    --------------------------------
+                    LOCAL CURSOR MOVEMENT
+                    --------------------------------
+
+                    This does NOT change code.
+
+                    It only sends cursor position.
+                    --------------------------------
+                    */
+
+                    EditorView.updateListener.of(
+                        (update) => {
+
+                            if (
+                                update.selectionSet &&
+                                update.view.hasFocus
+                            ) {
+
+                                const position =
+                                    update
+                                        .state
+                                        .selection
+                                        .main
+                                        .head;
+
+
+                                onCursorChange(
+                                    position
+                                );
+
+                            }
+
+                        }
+                    ),
+
+
+                    /*
+                    --------------------------------
+                    LOCAL TYPING
+                    --------------------------------
+
+                    Browser input means THIS user
+                    physically interacted with editor.
+
+                    Remote Yjs updates do not trigger
+                    this.
+                    --------------------------------
+                    */
+
+                    EditorView.domEventHandlers({
+
+                        input: () => {
+
+                            onLocalEdit();
+
+                        },
+
+                    }),
+
+
+                    /*
+                    --------------------------------
+                    EDITOR THEME
+                    --------------------------------
                     */
 
                     EditorView.theme({
 
                         "&": {
-                            height: "100%",
+
+                            height:
+                                "100%",
+
                         },
 
                         ".cm-scroller": {
 
-                            overflow: "auto",
+                            overflow:
+                                "auto",
 
                             fontFamily:
                                 '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
 
-                            fontSize: "14px",
+                            fontSize:
+                                "14px",
 
                         },
 
                         ".cm-content": {
 
-                            padding: "20px 0",
+                            padding:
+                                "20px 0",
 
                         },
 
                         ".cm-line": {
 
-                            padding: "0 20px",
+                            padding:
+                                "0 20px",
 
-                            textAlign: "left",
+                            textAlign:
+                                "left",
 
                         },
 
@@ -264,7 +640,8 @@ const CodeEditor = ({
                             backgroundColor:
                                 "#08090f",
 
-                            border: "none",
+                            border:
+                                "none",
 
                             color:
                                 "#3d3f4b",
@@ -278,6 +655,105 @@ const CodeEditor = ({
 
                         },
 
+
+                        /*
+                        ==================================
+                        REMOTE CURSOR
+                        ==================================
+                        */
+
+                        ".remoteCursorWrapper": {
+
+                            position:
+                                "relative",
+
+                            display:
+                                "inline-block",
+
+                            width:
+                                "0",
+
+                            height:
+                                "1.4em",
+
+                            verticalAlign:
+                                "text-bottom",
+
+                            pointerEvents:
+                                "none",
+
+                            zIndex:
+                                "10",
+
+                        },
+
+
+                        ".remoteCursorLine": {
+
+                            position:
+                                "absolute",
+
+                            left:
+                                "0",
+
+                            top:
+                                "-1px",
+
+                            width:
+                                "2px",
+
+                            height:
+                                "1.4em",
+
+                            background:
+                                "var(--cursor-color)",
+
+                            borderRadius:
+                                "1px",
+
+                        },
+
+
+                        ".remoteCursorLabel": {
+
+                            position:
+                                "absolute",
+
+                            left:
+                                "3px",
+
+                            top:
+                                "-20px",
+
+                            background:
+                                "var(--cursor-color)",
+
+                            color:
+                                "#ffffff",
+
+                            fontSize:
+                                "10px",
+
+                            lineHeight:
+                                "16px",
+
+                            padding:
+                                "1px 5px",
+
+                            borderRadius:
+                                "3px",
+
+                            whiteSpace:
+                                "nowrap",
+
+                            fontFamily:
+                                "system-ui, sans-serif",
+
+                            fontWeight:
+                                "600",
+
+                        },
+
                     }),
 
                 ],
@@ -287,7 +763,7 @@ const CodeEditor = ({
 
         /*
         ============================================
-        CREATE EDITOR
+        CREATE VIEW
         ============================================
         */
 
@@ -303,6 +779,24 @@ const CodeEditor = ({
 
 
         /*
+        Give parent access to editor.
+        */
+
+        onEditorReady(
+            view
+        );
+
+
+        /*
+        Send initial cursor.
+        */
+
+        onCursorChange(
+            view.state.selection.main.head
+        );
+
+
+        /*
         ============================================
         CLEANUP
         ============================================
@@ -310,23 +804,36 @@ const CodeEditor = ({
 
         return () => {
 
+            onEditorReady(
+                null
+            );
+
+
             view.destroy();
 
             undoManager.destroy();
 
         };
 
-    }, [ytext]);
+    }, [
+        ytext,
+        onLocalEdit,
+        onCursorChange,
+        onEditorReady,
+    ]);
 
 
     return (
 
         <div
-            ref={editorContainerRef}
+            ref={
+                editorContainerRef
+            }
             className="codeMirrorWrapper"
         />
 
     );
+
 };
 
 
@@ -374,7 +881,17 @@ const EditorPage = () => {
 
     /*
     ================================================
-    YJS DOCUMENT
+    EDITOR VIEW
+    ================================================
+    */
+
+    const editorViewRef =
+        useRef(null);
+
+
+    /*
+    ================================================
+    YJS
     ================================================
     */
 
@@ -384,7 +901,7 @@ const EditorPage = () => {
 
     /*
     ================================================
-    SHARED TEXT
+    UI STATE
     ================================================
     */
 
@@ -394,23 +911,11 @@ const EditorPage = () => {
     ] = useState(null);
 
 
-    /*
-    ================================================
-    COLLABORATORS
-    ================================================
-    */
-
     const [
         collaborators,
         setCollaborators
     ] = useState([]);
 
-
-    /*
-    ================================================
-    WHO IS ACTUALLY EDITING
-    ================================================
-    */
 
     const [
         editingUsers,
@@ -418,23 +923,11 @@ const EditorPage = () => {
     ] = useState({});
 
 
-    /*
-    ================================================
-    LIVE ACTIVITY
-    ================================================
-    */
-
     const [
         activities,
         setActivities
     ] = useState([]);
 
-
-    /*
-    ================================================
-    CONNECTION STATUS
-    ================================================
-    */
 
     const [
         connectionStatus,
@@ -443,12 +936,6 @@ const EditorPage = () => {
         "Connecting"
     );
 
-
-    /*
-    ================================================
-    LANGUAGE
-    ================================================
-    */
 
     const [
         language,
@@ -460,7 +947,7 @@ const EditorPage = () => {
 
     /*
     ================================================
-    LOCAL EDITING TIMER
+    LOCAL EDIT TIMER
     ================================================
     */
 
@@ -474,13 +961,92 @@ const EditorPage = () => {
 
     /*
     ================================================
-    LOCAL EDIT HANDLER
+    CURSOR THROTTLE
     ================================================
+    */
 
-    This is called ONLY when the current user's
-    Yjs document produces a LOCAL update.
+    const cursorTimer =
+        useRef(null);
 
-    It is NOT called for remote updates.
+
+    const pendingCursor =
+        useRef(null);
+
+
+    /*
+    ================================================
+    CURSOR SEND
+    ================================================
+    */
+
+    const sendCursor =
+        useCallback(
+            (position) => {
+
+                pendingCursor.current =
+                    position;
+
+
+                /*
+                Don't send cursor updates
+                50 times in one second.
+                */
+
+                if (
+                    cursorTimer.current
+                ) {
+
+                    return;
+
+                }
+
+
+                cursorTimer.current =
+                    setTimeout(() => {
+
+                        cursorTimer.current =
+                            null;
+
+
+                        const socket =
+                            socketRef.current;
+
+
+                        const positionToSend =
+                            pendingCursor.current;
+
+
+                        if (
+                            socket &&
+                            socket.connected &&
+                            positionToSend !==
+                                null
+                        ) {
+
+                            socket.emit(
+                                "cursor-update",
+                                {
+
+                                    roomId,
+
+                                    position:
+                                        positionToSend,
+
+                                }
+                            );
+
+                        }
+
+                    }, 50);
+
+            },
+            [roomId]
+        );
+
+
+    /*
+    ================================================
+    LOCAL EDIT
     ================================================
     */
 
@@ -492,15 +1058,11 @@ const EditorPage = () => {
 
 
             if (!socket) {
+
                 return;
+
             }
 
-
-            /*
-            ----------------------------------------
-            START EDITING SESSION
-            ----------------------------------------
-            */
 
             if (
                 !localEditing.current
@@ -509,12 +1071,6 @@ const EditorPage = () => {
                 localEditing.current =
                     true;
 
-
-                /*
-                Tell server:
-
-                THIS user is actually typing.
-                */
 
                 socket.emit(
                     "edit-activity",
@@ -526,21 +1082,10 @@ const EditorPage = () => {
             }
 
 
-            /*
-            ----------------------------------------
-            RESET LOCAL TIMER
-            ----------------------------------------
-            */
-
             clearTimeout(
                 editingTimer.current
             );
 
-
-            /*
-            If no local typing for 5 seconds,
-            this user's editing session ends.
-            */
 
             editingTimer.current =
                 setTimeout(() => {
@@ -555,7 +1100,25 @@ const EditorPage = () => {
 
     /*
     ================================================
-    MAIN SOCKET + YJS EFFECT
+    EDITOR READY
+    ================================================
+    */
+
+    const handleEditorReady =
+        useCallback(
+            (view) => {
+
+                editorViewRef.current =
+                    view;
+
+            },
+            []
+        );
+
+
+    /*
+    ================================================
+    MAIN EFFECT
     ================================================
     */
 
@@ -563,7 +1126,7 @@ const EditorPage = () => {
 
         /*
         ============================================
-        CREATE SOCKET
+        SOCKET
         ============================================
         */
 
@@ -599,7 +1162,7 @@ const EditorPage = () => {
 
         /*
         ============================================
-        CREATE YJS DOCUMENT
+        YJS DOCUMENT
         ============================================
         */
 
@@ -624,24 +1187,7 @@ const EditorPage = () => {
 
         /*
         ============================================
-        LOCAL YJS UPDATE
-        ============================================
-
-        THIS is the important part.
-
-        When THIS user types:
-
-        CodeMirror
-             ↓
-        Yjs
-             ↓
-        ydoc "update"
-             ↓
-        origin is local
-             ↓
-        send to server
-             ↓
-        activity for THIS user
+        YJS UPDATE
         ============================================
         */
 
@@ -652,22 +1198,15 @@ const EditorPage = () => {
             ) => {
 
                 /*
-                ====================================
-                REMOTE UPDATE
-                ====================================
+                Remote update.
 
-                Another user typed.
-
-                We apply the update to our
-                document, but we MUST NOT:
-
-                ❌ send it again
-                ❌ mark ourselves editing
-                ❌ create activity
+                Don't send it back.
+                Don't create activity.
                 */
 
                 if (
-                    origin === "remote"
+                    origin ===
+                    "remote"
                 ) {
 
                     return;
@@ -676,18 +1215,9 @@ const EditorPage = () => {
 
 
                 /*
-                ====================================
-                LOCAL UPDATE
-                ====================================
+                Local update.
 
-                This update came from THIS user's
-                editor.
-
-                Therefore:
-
-                ✅ send update
-                ✅ mark THIS user editing
-                ====================================
+                Send to server.
                 */
 
                 socket.emit(
@@ -701,22 +1231,8 @@ const EditorPage = () => {
                     }
                 );
 
-
-                /*
-                IMPORTANT:
-
-                Only the actual local editor
-                reaches this line.
-                */
-
-                handleLocalEdit();
-
             };
 
-
-        /*
-        Listen for Yjs changes.
-        */
 
         ydoc.on(
             "update",
@@ -726,7 +1242,7 @@ const EditorPage = () => {
 
         /*
         ============================================
-        RECEIVE REMOTE YJS UPDATE
+        REMOTE YJS UPDATE
         ============================================
         */
 
@@ -734,23 +1250,6 @@ const EditorPage = () => {
             (update) => {
 
                 try {
-
-                    /*
-                    IMPORTANT:
-
-                    origin = "remote"
-
-                    Therefore when Yjs fires
-                    its update event, our
-                    handleYUpdate() sees:
-
-                    origin === "remote"
-
-                    and returns.
-
-                    So the receiving user is
-                    NOT marked as editing.
-                    */
 
                     Y.applyUpdate(
                         ydoc,
@@ -782,7 +1281,7 @@ const EditorPage = () => {
 
         /*
         ============================================
-        RECEIVE INITIAL ROOM STATE
+        INITIAL YJS STATE
         ============================================
         */
 
@@ -821,7 +1320,7 @@ const EditorPage = () => {
 
         /*
         ============================================
-        SOCKET CONNECTED
+        CONNECT
         ============================================
         */
 
@@ -840,10 +1339,6 @@ const EditorPage = () => {
                 );
 
 
-                /*
-                Join room.
-                */
-
                 socket.emit(
                     "join-room",
                     {
@@ -861,7 +1356,7 @@ const EditorPage = () => {
 
         /*
         ============================================
-        SOCKET DISCONNECTED
+        DISCONNECT
         ============================================
         */
 
@@ -869,19 +1364,10 @@ const EditorPage = () => {
             "disconnect",
             () => {
 
-                console.log(
-                    "Disconnected from CodeMesh"
-                );
-
-
                 setConnectionStatus(
                     "Reconnecting"
                 );
 
-
-                /*
-                Local editing session must reset.
-                */
 
                 localEditing.current =
                     false;
@@ -898,13 +1384,7 @@ const EditorPage = () => {
 
         socket.on(
             "connect_error",
-            (error) => {
-
-                console.error(
-                    "Connection error:",
-                    error.message
-                );
-
+            () => {
 
                 setConnectionStatus(
                     "Reconnecting"
@@ -916,7 +1396,7 @@ const EditorPage = () => {
 
         /*
         ============================================
-        ROOM USERS
+        COLLABORATORS
         ============================================
         */
 
@@ -934,19 +1414,7 @@ const EditorPage = () => {
 
         /*
         ============================================
-        EDITING STATE
-        ============================================
-
-        Server tells us EXACTLY which socket
-        is currently editing.
-
-        Example:
-
-        {
-            "abc123": true
-        }
-
-        means only abc123 is editing.
+        EDITING USERS
         ============================================
         */
 
@@ -965,7 +1433,9 @@ const EditorPage = () => {
                         };
 
 
-                        if (editing) {
+                        if (
+                            editing
+                        ) {
 
                             next[id] =
                                 true;
@@ -996,14 +1466,14 @@ const EditorPage = () => {
             "editing-users",
             ({ users }) => {
 
-                const editingMap =
+                const map =
                     {};
 
 
                 users.forEach(
                     (user) => {
 
-                        editingMap[
+                        map[
                             user.id
                         ] = true;
 
@@ -1012,7 +1482,7 @@ const EditorPage = () => {
 
 
                 setEditingUsers(
-                    editingMap
+                    map
                 );
 
             }
@@ -1031,10 +1501,6 @@ const EditorPage = () => {
 
                 setActivities(
                     (previous) => {
-
-                        /*
-                        Prevent duplicate events.
-                        */
 
                         if (
                             previous.some(
@@ -1066,6 +1532,156 @@ const EditorPage = () => {
 
         /*
         ============================================
+        REMOTE CURSOR
+        ============================================
+        */
+
+        const showRemoteCursor =
+            (cursor) => {
+
+                const view =
+                    editorViewRef.current;
+
+
+                if (!view) {
+
+                    return;
+
+                }
+
+
+                /*
+                Keep cursor inside document.
+                */
+
+                const position =
+                    Math.min(
+                        Math.max(
+                            0,
+                            cursor.position
+                        ),
+                        view.state.doc.length
+                    );
+
+
+                view.dispatch({
+
+                    effects:
+                        remoteCursorEffect.of({
+
+                            id:
+                                cursor.id,
+
+                            username:
+                                cursor.username,
+
+                            position,
+
+                            color:
+                                getCursorColor(
+                                    cursor.id
+                                ),
+
+                        }),
+
+                });
+
+            };
+
+
+        socket.on(
+            "cursor-update",
+            showRemoteCursor
+        );
+
+
+        /*
+        ============================================
+        EXISTING CURSORS
+        ============================================
+        */
+
+        const handleRoomCursors =
+            ({ cursors }) => {
+
+                /*
+                Editor might not be mounted yet.
+
+                If it isn't, wait a little and
+                apply them after mount.
+                */
+
+                if (
+                    !editorViewRef.current
+                ) {
+
+                    setTimeout(() => {
+
+                        cursors.forEach(
+                            showRemoteCursor
+                        );
+
+                    }, 100);
+
+                    return;
+
+                }
+
+
+                cursors.forEach(
+                    showRemoteCursor
+                );
+
+            };
+
+
+        socket.on(
+            "room-cursors",
+            handleRoomCursors
+        );
+
+
+        /*
+        ============================================
+        REMOVE CURSOR
+        ============================================
+        */
+
+        socket.on(
+            "cursor-remove",
+            ({ id }) => {
+
+                const view =
+                    editorViewRef.current;
+
+
+                if (!view) {
+
+                    return;
+
+                }
+
+
+                view.dispatch({
+
+                    effects:
+                        remoteCursorEffect.of({
+
+                            id,
+
+                            remove:
+                                true,
+
+                        }),
+
+                });
+
+            }
+        );
+
+
+        /*
+        ============================================
         CLEANUP
         ============================================
         */
@@ -1074,6 +1690,11 @@ const EditorPage = () => {
 
             clearTimeout(
                 editingTimer.current
+            );
+
+
+            clearTimeout(
+                cursorTimer.current
             );
 
 
@@ -1101,9 +1722,11 @@ const EditorPage = () => {
             ydoc.destroy();
 
 
-            socketRef.current =
+            editorViewRef.current =
                 null;
 
+            socketRef.current =
+                null;
 
             ydocRef.current =
                 null;
@@ -1118,13 +1741,12 @@ const EditorPage = () => {
     }, [
         roomId,
         username,
-        handleLocalEdit,
     ]);
 
 
     /*
     ================================================
-    COPY ROOM ID
+    COPY ROOM
     ================================================
     */
 
@@ -1249,7 +1871,7 @@ const EditorPage = () => {
                             "connectionStatus " +
                             (
                                 connectionStatus ===
-                                    "Connected"
+                                "Connected"
                                     ? "connected"
                                     : "reconnecting"
                             )
@@ -1280,7 +1902,7 @@ const EditorPage = () => {
 
 
             {/* =====================================
-                MAIN
+                LAYOUT
             ===================================== */}
 
             <div className="editorLayout">
@@ -1374,14 +1996,6 @@ const EditorPage = () => {
                             collaborators.map(
                                 (user) => {
 
-                                    const isEditing =
-                                        Boolean(
-                                            editingUsers[
-                                            user.id
-                                            ]
-                                        );
-
-
                                     const isMe =
                                         user.id ===
                                         socketRef
@@ -1443,14 +2057,7 @@ const EditorPage = () => {
 
 
                                             <span
-                                                className={
-                                                    "userOnline " +
-                                                    (
-                                                        isEditing
-                                                            ? "editingDot"
-                                                            : ""
-                                                    )
-                                                }
+                                                className="userOnline"
                                             />
 
                                         </div>
@@ -1492,7 +2099,7 @@ const EditorPage = () => {
 
 
                 {/* =================================
-                    MAIN EDITOR
+                    EDITOR
                 ================================= */}
 
                 <main className="editorMain">
@@ -1579,8 +2186,22 @@ const EditorPage = () => {
                             ytext && (
 
                                 <CodeEditor
-                                    ytext={ytext}
-                                    onLocalEdit={handleLocalEdit}
+                                    ytext={
+                                        ytext
+                                    }
+
+                                    onLocalEdit={
+                                        handleLocalEdit
+                                    }
+
+                                    onCursorChange={
+                                        sendCursor
+                                    }
+
+                                    onEditorReady={
+                                        handleEditorReady
+                                    }
+
                                 />
 
                             )
@@ -1619,7 +2240,7 @@ const EditorPage = () => {
 
                                 {
                                     connectionStatus ===
-                                        "Connected"
+                                    "Connected"
                                         ? "Synced"
                                         : connectionStatus
                                 }
@@ -1634,7 +2255,7 @@ const EditorPage = () => {
 
 
                 {/* =================================
-                    RIGHT ACTIVITY PANEL
+                    RIGHT ACTIVITY
                 ================================= */}
 
                 <aside className="rightPanel">
@@ -1689,10 +2310,10 @@ const EditorPage = () => {
                                                         "activityAvatar " +
                                                         (
                                                             activity.type ===
-                                                                "leave"
+                                                            "leave"
                                                                 ? "leaveAvatar"
                                                                 : activity.username ===
-                                                                    username
+                                                                  username
                                                                     ? "purpleAvatar"
                                                                     : "blueAvatar"
                                                         )
@@ -1714,7 +2335,7 @@ const EditorPage = () => {
 
                                                         {
                                                             activity.username ===
-                                                                username
+                                                            username
                                                                 ? "You"
                                                                 : activity.username
                                                         }
@@ -1723,18 +2344,22 @@ const EditorPage = () => {
 
 
                                                     <p>
+
                                                         {
                                                             activity.message
                                                         }
+
                                                     </p>
 
 
                                                     <small>
+
                                                         {
                                                             formatTimeAgo(
                                                                 activity.timestamp
                                                             )
                                                         }
+
                                                     </small>
 
                                                 </div>
@@ -1780,6 +2405,7 @@ const EditorPage = () => {
         </div>
 
     );
+
 };
 
 

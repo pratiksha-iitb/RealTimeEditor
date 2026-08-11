@@ -20,6 +20,7 @@ const io = new Server(server, {
 
 const PORT = 5001;
 
+
 /*
 ==================================================
 YJS ROOM DOCUMENTS
@@ -38,10 +39,6 @@ function getRoomDocument(roomId) {
         const ytext =
             ydoc.getText("codemirror");
 
-
-        /*
-        Initial code for a brand-new room
-        */
 
         ydoc.transact(() => {
 
@@ -76,7 +73,49 @@ collaborate();
 
 /*
 ==================================================
-GET ONLINE USERS
+ROOM CURSORS
+==================================================
+
+roomCursors:
+
+roomId
+   ↓
+socketId
+   ↓
+{
+    id,
+    username,
+    position
+}
+
+This is completely separate from
+the code/Yjs synchronization.
+==================================================
+*/
+
+const roomCursors = new Map();
+
+
+function getRoomCursors(roomId) {
+
+    if (!roomCursors.has(roomId)) {
+
+        roomCursors.set(
+            roomId,
+            new Map()
+        );
+
+    }
+
+    return roomCursors.get(
+        roomId
+    );
+}
+
+
+/*
+==================================================
+ONLINE USERS
 ==================================================
 */
 
@@ -121,12 +160,6 @@ function getRoomUsers(roomId) {
 }
 
 
-/*
-==================================================
-SEND ONLINE USERS
-==================================================
-*/
-
 function broadcastRoomUsers(roomId) {
 
     io.to(roomId).emit(
@@ -142,7 +175,7 @@ function broadcastRoomUsers(roomId) {
 
 /*
 ==================================================
-SEND CURRENT EDITING USERS
+EDITING USERS
 ==================================================
 */
 
@@ -173,9 +206,12 @@ function broadcastEditingUsers(roomId) {
         ) {
 
             editingUsers.push({
+
                 id: socketId,
+
                 username:
                     userSocket.username,
+
             });
 
         }
@@ -211,7 +247,7 @@ app.get("/", (req, res) => {
 
 /*
 ==================================================
-SOCKET.IO
+SOCKET CONNECTION
 ==================================================
 */
 
@@ -254,9 +290,9 @@ io.on("connection", (socket) => {
 
 
             /*
-            ------------------------------------------
-            Get/create Yjs document
-            ------------------------------------------
+            --------------------------------------
+            GET/CREATE YJS DOCUMENT
+            --------------------------------------
             */
 
             const ydoc =
@@ -266,9 +302,9 @@ io.on("connection", (socket) => {
 
 
             /*
-            ------------------------------------------
-            Send current document to this user
-            ------------------------------------------
+            --------------------------------------
+            SEND CURRENT CODE
+            --------------------------------------
             */
 
             const currentState =
@@ -284,9 +320,9 @@ io.on("connection", (socket) => {
 
 
             /*
-            ------------------------------------------
-            Send collaborators
-            ------------------------------------------
+            --------------------------------------
+            ONLINE USERS
+            --------------------------------------
             */
 
             broadcastRoomUsers(
@@ -295,9 +331,9 @@ io.on("connection", (socket) => {
 
 
             /*
-            ------------------------------------------
-            Send current editing users
-            ------------------------------------------
+            --------------------------------------
+            EDITING USERS
+            --------------------------------------
             */
 
             broadcastEditingUsers(
@@ -306,9 +342,31 @@ io.on("connection", (socket) => {
 
 
             /*
-            ------------------------------------------
-            Tell this user they joined
-            ------------------------------------------
+            --------------------------------------
+            EXISTING CURSORS
+            --------------------------------------
+            */
+
+            const cursors =
+                Array.from(
+                    getRoomCursors(
+                        roomId
+                    ).values()
+                );
+
+
+            socket.emit(
+                "room-cursors",
+                {
+                    cursors,
+                }
+            );
+
+
+            /*
+            --------------------------------------
+            ROOM JOINED
+            --------------------------------------
             */
 
             socket.emit(
@@ -321,9 +379,9 @@ io.on("connection", (socket) => {
 
 
             /*
-            ------------------------------------------
-            JOIN ACTIVITY
-            ------------------------------------------
+            --------------------------------------
+            ACTIVITY
+            --------------------------------------
             */
 
             io.to(roomId).emit(
@@ -355,27 +413,16 @@ io.on("connection", (socket) => {
     ==============================================
     YJS UPDATE
     ==============================================
-
-    Local user:
-
-    CodeMirror
-        ↓
-    Yjs
-        ↓
-    y-update
-        ↓
-    Server
-        ↓
-    Other users
-
-    ==============================================
     */
 
     socket.on(
         "y-update",
         ({ roomId, update }) => {
 
-            if (!roomId || !update) {
+            if (
+                !roomId ||
+                !update
+            ) {
                 return;
             }
 
@@ -388,14 +435,6 @@ io.on("connection", (socket) => {
 
             try {
 
-                /*
-                Apply update to server
-                document.
-
-                Yjs handles conflict
-                resolution.
-                */
-
                 Y.applyUpdate(
                     ydoc,
                     new Uint8Array(update),
@@ -404,13 +443,8 @@ io.on("connection", (socket) => {
 
 
                 /*
-                IMPORTANT:
-
-                Send ONLY this update to
-                the other users.
-
-                We do NOT send a full
-                document.
+                Send update to everyone
+                EXCEPT sender.
                 */
 
                 socket
@@ -419,7 +453,6 @@ io.on("connection", (socket) => {
                         "y-update",
                         update
                     );
-
 
             } catch (error) {
 
@@ -436,79 +469,7 @@ io.on("connection", (socket) => {
 
     /*
     ==============================================
-    YJS STATE
-    ==============================================
-
-    Used when a user reconnects.
-
-    Their local Yjs document may contain
-    edits that the server doesn't have yet.
-
-    We merge that state into the server.
-    ==============================================
-    */
-
-    socket.on(
-        "y-state",
-        ({ roomId, state }) => {
-
-            if (!roomId || !state) {
-                return;
-            }
-
-
-            const ydoc =
-                getRoomDocument(
-                    roomId
-                );
-
-
-            try {
-
-                Y.applyUpdate(
-                    ydoc,
-                    new Uint8Array(state),
-                    socket
-                );
-
-
-                /*
-                Send the merged state to
-                the other users.
-                */
-
-                socket
-                    .to(roomId)
-                    .emit(
-                        "y-sync",
-                        Y.encodeStateAsUpdate(
-                            ydoc
-                        )
-                    );
-
-
-            } catch (error) {
-
-                console.error(
-                    "Yjs state error:",
-                    error
-                );
-
-            }
-
-        }
-    );
-
-
-    /*
-    ==============================================
-    EDITING START
-    ==============================================
-
-    THIS EVENT ONLY comes from the user
-    who actually typed.
-
-    Remote Yjs updates NEVER trigger this.
+    EDIT ACTIVITY
     ==============================================
     */
 
@@ -527,7 +488,7 @@ io.on("connection", (socket) => {
             /*
             Already editing?
 
-            Don't create another activity.
+            Do nothing.
             */
 
             if (!socket.isEditing) {
@@ -537,29 +498,10 @@ io.on("connection", (socket) => {
 
 
                 /*
-                --------------------------------------
-                LEFT PANEL
-                --------------------------------------
-                */
+                IMPORTANT:
 
-                io.to(roomId).emit(
-                    "editing-state",
-                    {
-                        id: socket.id,
-
-                        username:
-                            socket.username,
-
-                        editing:
-                            true,
-                    }
-                );
-
-
-                /*
-                --------------------------------------
-                RIGHT ACTIVITY PANEL
-                --------------------------------------
+                This ONLY represents the
+                person who actually typed.
                 */
 
                 io.to(roomId).emit(
@@ -588,9 +530,9 @@ io.on("connection", (socket) => {
 
 
             /*
-            ------------------------------------------
-            RESET 5 SECOND INACTIVITY TIMER
-            ------------------------------------------
+            --------------------------------------
+            5 SECOND INACTIVITY
+            --------------------------------------
             */
 
             clearTimeout(
@@ -604,11 +546,6 @@ io.on("connection", (socket) => {
                     socket.isEditing =
                         false;
 
-
-                    /*
-                    Tell everyone that
-                    THIS user stopped editing.
-                    */
 
                     io.to(roomId).emit(
                         "editing-state",
@@ -626,8 +563,83 @@ io.on("connection", (socket) => {
                         }
                     );
 
-
                 }, 5000);
+
+        }
+    );
+
+
+    /*
+    ==============================================
+    CURSOR UPDATE
+    ==============================================
+
+    This is NOT code synchronization.
+
+    It only tells other users:
+
+    "My cursor is currently at position X."
+    ==============================================
+    */
+
+    socket.on(
+        "cursor-update",
+        ({
+            roomId,
+            position,
+        }) => {
+
+            if (
+                !roomId ||
+                socket.roomId !== roomId
+            ) {
+                return;
+            }
+
+
+            const cursors =
+                getRoomCursors(
+                    roomId
+                );
+
+
+            const cursor = {
+
+                id:
+                    socket.id,
+
+                username:
+                    socket.username,
+
+                position:
+                    Math.max(
+                        0,
+                        Number(position) || 0
+                    ),
+
+            };
+
+
+            /*
+            Save latest cursor.
+            */
+
+            cursors.set(
+                socket.id,
+                cursor
+            );
+
+
+            /*
+            Send ONLY to other users.
+            */
+
+            socket
+                .to(roomId)
+                .emit(
+                    "cursor-update",
+                    cursor
+                );
 
         }
     );
@@ -663,9 +675,35 @@ io.on("connection", (socket) => {
 
 
             /*
-            If this user was editing,
-            explicitly remove their
-            editing state.
+            --------------------------------------
+            REMOVE CURSOR
+            --------------------------------------
+            */
+
+            const cursors =
+                getRoomCursors(
+                    roomId
+                );
+
+
+            cursors.delete(
+                socket.id
+            );
+
+
+            io.to(roomId).emit(
+                "cursor-remove",
+                {
+                    id:
+                        socket.id,
+                }
+            );
+
+
+            /*
+            --------------------------------------
+            EDITING STATE
+            --------------------------------------
             */
 
             if (socket.isEditing) {
@@ -690,7 +728,9 @@ io.on("connection", (socket) => {
 
 
             /*
-            Update online users
+            --------------------------------------
+            USERS
+            --------------------------------------
             */
 
             broadcastRoomUsers(
@@ -699,7 +739,9 @@ io.on("connection", (socket) => {
 
 
             /*
-            Update editing users
+            --------------------------------------
+            EDITING USERS
+            --------------------------------------
             */
 
             broadcastEditingUsers(
@@ -708,9 +750,9 @@ io.on("connection", (socket) => {
 
 
             /*
-            ------------------------------------------
+            --------------------------------------
             LEAVE ACTIVITY
-            ------------------------------------------
+            --------------------------------------
             */
 
             io.to(roomId).emit(
