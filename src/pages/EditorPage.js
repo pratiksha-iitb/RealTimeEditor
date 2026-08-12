@@ -919,9 +919,9 @@ const EditorPage = () => {
 
 
     const [
-        editingUsers,
-        setEditingUsers
-    ] = useState({});
+    ,
+    setEditingUsers
+] = useState({});
 
 
     const [
