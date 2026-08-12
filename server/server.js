@@ -2,7 +2,7 @@ const express = require("express");
 const http = require("http");
 const cors = require("cors");
 const { Server } = require("socket.io");
-const sqlite3 = require("sqlite3").verbose();
+const { createClient } = require("@libsql/client");
 const Y = require("yjs");
 require("dotenv").config();
 
@@ -28,31 +28,22 @@ SQLITE
 ==================================================
 */
 
-const db = new sqlite3.Database("./codemesh.db", (error) => {
-    if (error) {
-        console.error("SQLite connection error:", error);
-    } else {
-        console.log("SQLite connected");
-    }
+const db = createClient({
+    url: process.env.TURSO_DATABASE_URL,
+    authToken: process.env.TURSO_AUTH_TOKEN,
 });
 
-db.run(
-    `
-    CREATE TABLE IF NOT EXISTS rooms (
-        roomId TEXT PRIMARY KEY,
-        yjsState BLOB,
-        updatedAt TEXT
-    )
-    `,
-    (error) => {
-        if (error) {
-            console.error("Failed to create rooms table:", error);
-        } else {
-            console.log("SQLite rooms table ready");
-        }
-    }
-);
+async function initializeDatabase() {
+    await db.execute(`
+        CREATE TABLE IF NOT EXISTS rooms (
+            roomId TEXT PRIMARY KEY,
+            yjsState BLOB,
+            updatedAt TEXT
+        )
+    `);
 
+    console.log("Turso database ready");
+}
 
 /*
 ==================================================
@@ -103,127 +94,87 @@ GET / CREATE ROOM DOCUMENT
 
 async function getRoomDocument(roomId) {
 
-    /*
-    Already loaded in memory
-    */
-
     if (roomDocuments.has(roomId)) {
         return roomDocuments.get(roomId);
     }
-
-
-    /*
-    Someone else is already loading
-    this room.
-    */
 
     if (roomLoadingPromises.has(roomId)) {
         return await roomLoadingPromises.get(roomId);
     }
 
-
-    const loadingPromise = new Promise((resolve, reject) => {
+    const loadingPromise = (async () => {
 
         console.log(
-            `Loading room ${roomId} from SQLite...`
+            `Loading room ${roomId} from Turso...`
         );
 
-
-        db.get(
-            `
-            SELECT yjsState
-            FROM rooms
-            WHERE roomId = ?
+        const result = await db.execute({
+            sql: `
+                SELECT yjsState
+                FROM rooms
+                WHERE roomId = ?
             `,
-            [roomId],
-            (error, row) => {
+            args: [roomId],
+        });
 
-                if (error) {
+        const row = result.rows[0];
 
-                    console.error(
-                        `Failed to load room ${roomId}:`,
-                        error
-                    );
+        const ydoc = new Y.Doc();
 
-                    reject(error);
-                    return;
-                }
+        const ytext =
+            ydoc.getText("codemirror");
 
+        if (row && row.yjsState) {
 
-                const ydoc = new Y.Doc();
+            console.log(
+                `Restoring saved Yjs document for room ${roomId}`
+            );
 
-                const ytext =
-                    ydoc.getText("codemirror");
+            let state;
 
+            if (row.yjsState instanceof Uint8Array) {
+                state = row.yjsState;
+            } else if (Buffer.isBuffer(row.yjsState)) {
+                state = new Uint8Array(row.yjsState);
+            } else {
+                state = new Uint8Array(row.yjsState);
+            }
 
-                /*
-                ==========================================
-                EXISTING ROOM
-                ==========================================
-                */
+            Y.applyUpdate(
+                ydoc,
+                state
+            );
 
-                if (
-                    row &&
-                    row.yjsState
-                ) {
+        } else {
 
-                    console.log(
-                        `Restoring saved Yjs document for room ${roomId}`
-                    );
+            console.log(
+                `Creating new room ${roomId}`
+            );
 
+            ydoc.transact(() => {
 
-                    Y.applyUpdate(
-                        ydoc,
-                        new Uint8Array(row.yjsState)
-                    );
-
-                }
-
-
-                /*
-                ==========================================
-                NEW ROOM
-                ==========================================
-                */
-
-                else {
-
-                    console.log(
-                        `Creating new room ${roomId}`
-                    );
-
-
-                    ydoc.transact(() => {
-
-                        ytext.insert(
-                            0,
-                            DEFAULT_CODE
-                        );
-
-                    });
-
-                }
-
-
-                roomDocuments.set(
-                    roomId,
-                    ydoc
+                ytext.insert(
+                    0,
+                    DEFAULT_CODE
                 );
 
+            });
 
-                resolve(ydoc);
+        }
 
-            }
+        roomDocuments.set(
+            roomId,
+            ydoc
         );
 
-    });
+        return ydoc;
 
+    })();
 
     roomLoadingPromises.set(
         roomId,
         loadingPromise
     );
-
 
     try {
 
@@ -250,69 +201,44 @@ async function saveRoomDocument(roomId) {
     const ydoc =
         roomDocuments.get(roomId);
 
-
     if (!ydoc) {
         return;
     }
 
-
     try {
-
-        /*
-        Convert complete Yjs document
-        into binary state.
-        */
 
         const update =
             Y.encodeStateAsUpdate(ydoc);
 
-
         const buffer =
             Buffer.from(update);
-
 
         const updatedAt =
             new Date().toISOString();
 
+        await db.execute({
+            sql: `
+                INSERT INTO rooms
+                    (roomId, yjsState, updatedAt)
 
-        await new Promise(
-            (resolve, reject) => {
+                VALUES
+                    (?, ?, ?)
 
-                db.run(
-                    `
-                    INSERT INTO rooms
-                        (roomId, yjsState, updatedAt)
+                ON CONFLICT(roomId)
+                DO UPDATE SET
+                    yjsState = excluded.yjsState,
+                    updatedAt = excluded.updatedAt
+            `,
 
-                    VALUES
-                        (?, ?, ?)
-
-                    ON CONFLICT(roomId)
-                    DO UPDATE SET
-                        yjsState = excluded.yjsState,
-                        updatedAt = excluded.updatedAt
-                    `,
-                    [
-                        roomId,
-                        buffer,
-                        updatedAt,
-                    ],
-                    (error) => {
-
-                        if (error) {
-                            reject(error);
-                        } else {
-                            resolve();
-                        }
-
-                    }
-                );
-
-            }
-        );
-
+            args: [
+                roomId,
+                buffer,
+                updatedAt,
+            ],
+        });
 
         console.log(
-            `Room ${roomId} saved to SQLite`
+            `Room ${roomId} saved to Turso`
         );
 
     } catch (error) {
@@ -324,7 +250,6 @@ async function saveRoomDocument(roomId) {
 
     }
 }
-
 
 /*
 ==================================================
@@ -1128,18 +1053,25 @@ START SERVER
 ==================================================
 */
 
-server.listen(
-    PORT,
-    "0.0.0.0",
-    () => {
+async function startServer() {
+    try {
+        await initializeDatabase();
 
-        console.log(
-            `CodeMesh server running on http://localhost:${PORT}`
+        server.listen(PORT, "0.0.0.0", () => {
+            console.log(
+                `CodeMesh server running on port ${PORT}`
+            );
+        });
+
+    } catch (error) {
+        console.error(
+            "Failed to start server:",
+            error
         );
-
     }
-);
+}
 
+startServer();
 
 /*
 ==================================================
@@ -1149,45 +1081,23 @@ GRACEFUL SHUTDOWN
 
 async function shutdown() {
 
-    console.log(
-        "\nSaving rooms before shutdown..."
-    );
-
-
-    /*
-    Save every currently loaded room.
-    */
+    console.log("\nSaving rooms before shutdown...");
 
     const savePromises = [];
 
-
-    for (
-        const roomId
-        of roomDocuments.keys()
-    ) {
-
+    for (const roomId of roomDocuments.keys()) {
         savePromises.push(
             saveRoomDocument(roomId)
         );
-
     }
 
+    await Promise.all(savePromises);
 
-    await Promise.all(
-        savePromises
-    );
+    await db.close();
 
+    console.log("Turso connection closed");
 
-    db.close(() => {
-
-        console.log(
-            "SQLite closed"
-        );
-
-        process.exit(0);
-
-    });
-
+    process.exit(0);
 }
 
 

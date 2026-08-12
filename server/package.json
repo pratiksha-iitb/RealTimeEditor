@@ -12,12 +12,12 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@libsql/client": "^0.17.4",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "mongoose": "^9.9.2",
     "socket.io": "^4.8.3",
-    "sqlite3": "^6.0.1",
     "ws": "^8.21.3",
     "y-websocket": "^3.1.0",
     "yjs": "^13.6.32"
