@@ -51,7 +51,8 @@ DEFAULT CODE
 ==================================================
 */
 
-const DEFAULT_CODE = `const workspace = {
+const DEFAULT_FILES = {
+    "index.js": `const workspace = {
     name: "CodeMesh",
     status: "connected"
 };
@@ -61,7 +62,24 @@ function collaborate() {
 }
 
 collaborate();
-`;
+`,
+    "README.md": `# CodeMesh
+
+A real-time collaborative code editor.
+
+## Features
+
+- Real-time collaboration
+- Persistent rooms
+- Multi-file workspace
+- Remote cursors
+`,
+    "package.json": `{
+  "name": "codemesh-workspace",
+  "version": "1.0.0"
+}
+`
+};
 
 
 /*
@@ -120,9 +138,8 @@ async function getRoomDocument(roomId) {
         const row = result.rows[0];
 
         const ydoc = new Y.Doc();
-
-        const ytext =
-            ydoc.getText("codemirror");
+        const files = ydoc.getMap("files");
+        const fileTree = ydoc.getMap("fileTree");
 
         if (row && row.yjsState) {
 
@@ -145,6 +162,56 @@ async function getRoomDocument(roomId) {
                 state
             );
 
+            /*
+            ------------------------------------------
+            MIGRATE OLD SINGLE-FILE ROOMS
+            ------------------------------------------
+            Older CodeMesh rooms stored their code in
+            ydoc.getText("codemirror"). Move that content
+            into index.js automatically.
+            */
+
+            if (
+                files.size === 0 &&
+                ydoc.getText("codemirror").length > 0
+            ) {
+
+                const oldCode =
+                    ydoc.getText("codemirror").toString();
+
+                ydoc.transact(() => {
+
+                    const indexFile =
+                        new Y.Text();
+
+                    indexFile.insert(
+                        0,
+                        oldCode
+                    );
+
+                    files.set(
+                        "index.js",
+                        indexFile
+                    );
+
+                    files.set(
+                        "README.md",
+                        new Y.Text(
+                            DEFAULT_FILES["README.md"]
+                        )
+                    );
+
+                    files.set(
+                        "package.json",
+                        new Y.Text(
+                            DEFAULT_FILES["package.json"]
+                        )
+                    );
+
+                });
+
+            }
+
         } else {
 
             console.log(
@@ -153,14 +220,61 @@ async function getRoomDocument(roomId) {
 
             ydoc.transact(() => {
 
-                ytext.insert(
-                    0,
-                    DEFAULT_CODE
+                Object.entries(
+                    DEFAULT_FILES
+                ).forEach(
+                    ([fileName, content]) => {
+
+                        const file =
+                            new Y.Text();
+
+                        file.insert(
+                            0,
+                            content
+                        );
+
+                        files.set(
+                            fileName,
+                            file
+                        );
+
+                    }
                 );
 
             });
 
         }
+
+
+        /*
+         * Keep the shared file tree in sync with existing files.
+         * This is metadata only; file contents remain in `files`.
+         */
+        ydoc.transact(() => {
+            Array.from(files.keys()).forEach((filePath) => {
+                const parts = filePath.split("/").filter(Boolean);
+                let current = "";
+
+                parts.forEach((part, index) => {
+                    current = current
+                        ? `${current}/${part}`
+                        : part;
+
+                    if (!fileTree.has(current)) {
+                        fileTree.set(
+                            current,
+                            JSON.stringify({
+                                type:
+                                    index === parts.length - 1
+                                        ? "file"
+                                        : "folder",
+                                name: part,
+                            })
+                        );
+                    }
+                });
+            });
+        });
 
         roomDocuments.set(
             roomId,
@@ -801,7 +915,7 @@ io.on("connection", (socket) => {
 
     socket.on(
         "edit-activity",
-        ({ roomId }) => {
+        ({ roomId, fileName }) => {
 
             if (
                 !roomId ||
@@ -831,7 +945,7 @@ io.on("connection", (socket) => {
                             "edit",
 
                         message:
-                            "is editing index.js",
+                            `is editing ${fileName || "the workspace"}`,
 
                         timestamp:
                             Date.now(),
@@ -912,6 +1026,7 @@ io.on("connection", (socket) => {
         "cursor-update",
         ({
             roomId,
+            fileName,
             position,
         }) => {
 
@@ -937,6 +1052,9 @@ io.on("connection", (socket) => {
                 username:
                     socket.username,
 
+                fileName:
+                    fileName || "index.js",
+
                 position:
                     Math.max(
                         0,
@@ -958,6 +1076,47 @@ io.on("connection", (socket) => {
                     "cursor-update",
                     cursor
                 );
+
+        }
+    );
+
+
+    /*
+    ==============================================
+    REQUEST CURRENT FILE CURSORS
+    ==============================================
+    */
+
+    socket.on(
+        "request-room-cursors",
+        ({ roomId, fileName }) => {
+
+            if (
+                !roomId ||
+                socket.roomId !== roomId
+            ) {
+                return;
+            }
+
+            const cursors =
+                getRoomCursors(roomId);
+
+            const currentCursors =
+                Array.from(
+                    cursors.values()
+                ).filter(
+                    (cursor) =>
+                        cursor.fileName ===
+                        (fileName || "index.js")
+                );
+
+            socket.emit(
+                "room-cursors",
+                {
+                    cursors:
+                        currentCursors,
+                }
+            );
 
         }
     );

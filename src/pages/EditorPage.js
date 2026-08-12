@@ -899,12 +899,39 @@ const EditorPage = () => {
     const ydocRef =
         useRef(null);
 
+    const filesMapRef =
+        useRef(null);
+
+    const fileTreeMapRef =
+        useRef(null);
+
+    const projectInputRef =
+        useRef(null);
+
+    const activeFileRef =
+        useRef("index.js");
+
 
     /*
     ================================================
     UI STATE
     ================================================
     */
+
+    const [
+        files,
+        setFiles
+    ] = useState([]);
+
+    const [
+        ,
+        setTreeVersion
+    ] = useState(0);
+
+    const [
+        activeFile,
+        setActiveFile
+    ] = useState("index.js");
 
     const [
         ytext,
@@ -916,6 +943,13 @@ const EditorPage = () => {
         collaborators,
         setCollaborators
     ] = useState([]);
+
+    const [
+        collapsedFolders,
+        setCollapsedFolders
+    ] = useState(
+        () => new Set()
+    );
 
 
     const [
@@ -1030,6 +1064,9 @@ const EditorPage = () => {
 
                                     roomId,
 
+                                    fileName:
+                                        activeFile,
+
                                     position:
                                         positionToSend,
 
@@ -1041,7 +1078,10 @@ const EditorPage = () => {
                     }, 50);
 
             },
-            [roomId]
+            [
+                roomId,
+                activeFile,
+            ]
         );
 
 
@@ -1077,6 +1117,8 @@ const EditorPage = () => {
                     "edit-activity",
                     {
                         roomId,
+                        fileName:
+                            activeFile,
                     }
                 );
 
@@ -1096,7 +1138,10 @@ const EditorPage = () => {
 
                 }, 5000);
 
-        }, [roomId]);
+        }, [
+            roomId,
+            activeFile,
+        ]);
 
 
     /*
@@ -1171,18 +1216,157 @@ const EditorPage = () => {
             new Y.Doc();
 
 
-        const sharedText =
-            ydoc.getText(
-                "codemirror"
-            );
+        const filesMap =
+            ydoc.getMap("files");
 
+        const fileTreeMap =
+            ydoc.getMap("fileTree");
+
+        filesMapRef.current =
+            filesMap;
+
+        fileTreeMapRef.current =
+            fileTreeMap;
 
         ydocRef.current =
             ydoc;
 
+        /*
+        --------------------------------------------
+        FILE TREE
+        --------------------------------------------
+        The file tree is itself part of the shared
+        Yjs document, so every collaborator sees
+        file creation/deletion immediately.
+        */
 
-        setYtext(
-            sharedText
+        const syncFileList =
+            () => {
+
+                const names =
+                    Array.from(
+                        filesMap.keys()
+                    ).sort(
+                        (a, b) => {
+                            if (
+                                a === "index.js"
+                            ) return -1;
+
+                            if (
+                                b === "index.js"
+                            ) return 1;
+
+                            return a.localeCompare(
+                                b
+                            );
+                        }
+                    );
+
+                setFiles(
+                    names
+                );
+
+                setActiveFile(
+                    (current) => {
+
+                        if (
+                            current &&
+                            names.includes(
+                                current
+                            )
+                        ) {
+                            return current;
+                        }
+
+                        return (
+                            names[0] ||
+                            null
+                        );
+
+                    }
+                );
+
+            };
+
+        syncFileList();
+
+        filesMap.observe(
+            syncFileList
+        );
+
+        const syncFileTree =
+            () => {
+                setTreeVersion(
+                    (version) =>
+                        version + 1
+                );
+            };
+
+        fileTreeMap.observe(
+            syncFileTree
+        );
+
+        const ensureTreeFromFiles =
+            () => {
+
+                ydoc.transact(() => {
+
+                    Array.from(
+                        filesMap.keys()
+                    ).forEach(
+                        (filePath) => {
+
+                            const parts =
+                                String(filePath)
+                                    .split("/")
+                                    .filter(Boolean);
+
+                            let currentPath = "";
+
+                            parts.forEach(
+                                (part, index) => {
+
+                                    currentPath =
+                                        currentPath
+                                            ? `${currentPath}/${part}`
+                                            : part;
+
+                                    const isFile =
+                                        index ===
+                                        parts.length - 1;
+
+                                    if (
+                                        !fileTreeMap.has(
+                                            currentPath
+                                        )
+                                    ) {
+
+                                        fileTreeMap.set(
+                                            currentPath,
+                                            JSON.stringify({
+                                                type:
+                                                    isFile
+                                                        ? "file"
+                                                        : "folder",
+                                            })
+                                        );
+
+                                    }
+
+                                }
+                            );
+
+                        }
+                    );
+
+                });
+
+            };
+
+        ensureTreeFromFiles();
+
+        filesMap.observe(
+            ensureTreeFromFiles
         );
 
 
@@ -1495,12 +1679,23 @@ socket.on(
                 "cursor-update",
                 {
                     roomId,
+                    fileName:
+                        activeFile,
                     position:
                         view.state.selection.main.head,
                 }
             );
 
         }
+
+        socket.emit(
+            "request-room-cursors",
+            {
+                roomId,
+                fileName:
+                    activeFile,
+            }
+        );
 
     }
 );
@@ -1650,6 +1845,19 @@ socket.on(
 
         const showRemoteCursor =
             (cursor) => {
+
+                /*
+                Cursors belong to a specific file.
+                Do not render cursors from another file.
+                */
+
+                if (
+                    cursor.fileName &&
+                    cursor.fileName !==
+                        activeFileRef.current
+                ) {
+                    return;
+                }
 
                 /*
                 Never render my own cursor.
@@ -1835,6 +2043,18 @@ socket.on(
             );
 
 
+            filesMap.unobserve(
+                syncFileList
+            );
+
+            filesMap.unobserve(
+                ensureTreeFromFiles
+            );
+
+            fileTreeMap.unobserve(
+                syncFileTree
+            );
+
             ydoc.off(
                 "update",
                 handleYUpdate
@@ -1868,6 +2088,12 @@ socket.on(
             ydocRef.current =
                 null;
 
+            filesMapRef.current =
+                null;
+
+            activeFileRef.current =
+                null;
+
 
             setYtext(
                 null
@@ -1879,6 +2105,613 @@ socket.on(
         roomId,
         username,
     ]);
+
+
+    /*
+    ================================================
+    ACTIVE FILE
+    ================================================
+    */
+
+    useEffect(() => {
+
+        activeFileRef.current =
+            activeFile;
+
+        const filesMap =
+            filesMapRef.current;
+
+        if (
+            !filesMap ||
+            !activeFile
+        ) {
+            setYtext(null);
+            return;
+        }
+
+        const nextText =
+            filesMap.get(
+                activeFile
+            );
+
+        if (
+            nextText instanceof Y.Text
+        ) {
+            setYtext(
+                nextText
+            );
+        } else {
+            setYtext(null);
+        }
+
+        /*
+        Ask the server for the latest remote cursors
+        for this file. Cursor positions are file-specific.
+        */
+
+        const socket =
+            socketRef.current;
+
+        if (
+            socket &&
+            socket.connected
+        ) {
+            socket.emit(
+                "request-room-cursors",
+                {
+                    roomId,
+                    fileName:
+                        activeFile,
+                }
+            );
+        }
+
+    }, [
+        activeFile,
+        roomId,
+        files,
+    ]);
+
+
+    /*
+    ================================================
+    FILE ACTIONS
+    ================================================
+    */
+
+    const getInitialFileContent =
+        (fileName) => {
+
+            if (
+                fileName.endsWith(".md")
+            ) {
+                return "# " +
+                    fileName
+                        .replace(
+                            /\.md$/i,
+                            ""
+                        ) +
+                    "\n";
+            }
+
+            if (
+                fileName.endsWith(".json")
+            ) {
+                return "{}\n";
+            }
+
+            return "";
+        };
+
+
+    const addTreeEntry =
+        (path, type) => {
+
+            const treeMap =
+                fileTreeMapRef.current;
+
+            if (!treeMap || !path) {
+                return;
+            }
+
+            const parts =
+                String(path)
+                    .split("/")
+                    .filter(Boolean);
+
+            let currentPath = "";
+
+            parts.forEach(
+                (part, index) => {
+
+                    currentPath =
+                        currentPath
+                            ? `${currentPath}/${part}`
+                            : part;
+
+                    const isFile =
+                        type === "file" &&
+                        index ===
+                            parts.length - 1;
+
+                    if (
+                        !treeMap.has(
+                            currentPath
+                        )
+                    ) {
+
+                        treeMap.set(
+                            currentPath,
+                            JSON.stringify({
+                                type:
+                                    isFile
+                                        ? "file"
+                                        : "folder",
+                            })
+                        );
+
+                    }
+
+                }
+            );
+
+        };
+
+
+    const handleCreateFile =
+        () => {
+
+            const filesMap =
+                filesMapRef.current;
+
+            if (!filesMap) {
+                return;
+            }
+
+            const name =
+                window.prompt(
+                    "New file path",
+                    "src/newFile.js"
+                );
+
+            if (!name) {
+                return;
+            }
+
+            const fileName =
+                name
+                    .trim()
+                    .replace(
+                        /^\/+|\/+$/g,
+                        ""
+                    );
+
+            if (
+                !fileName ||
+                fileName.length > 180 ||
+                fileName.includes("..") ||
+                /[\\]/.test(fileName)
+            ) {
+                toast.error(
+                    "Use a valid file path"
+                );
+                return;
+            }
+
+            if (
+                filesMap.has(fileName)
+            ) {
+                toast.error(
+                    "File already exists"
+                );
+                setActiveFile(
+                    fileName
+                );
+                return;
+            }
+
+            const file =
+                new Y.Text();
+
+            file.insert(
+                0,
+                getInitialFileContent(
+                    fileName
+                )
+            );
+
+            ydocRef.current?.transact(
+                () => {
+
+                    filesMap.set(
+                        fileName,
+                        file
+                    );
+
+                    addTreeEntry(
+                        fileName,
+                        "file"
+                    );
+
+                }
+            );
+
+            setActiveFile(
+                fileName
+            );
+
+            toast.success(
+                `${fileName} created`
+            );
+
+        };
+
+
+    const handleCreateFolder =
+        () => {
+
+            const treeMap =
+                fileTreeMapRef.current;
+
+            if (!treeMap) {
+                return;
+            }
+
+            const name =
+                window.prompt(
+                    "New folder path",
+                    "src/components"
+                );
+
+            if (!name) {
+                return;
+            }
+
+            const folderPath =
+                name
+                    .trim()
+                    .replace(
+                        /^\/+|\/+$/g,
+                        ""
+                    );
+
+            if (
+                !folderPath ||
+                folderPath.length > 180 ||
+                folderPath.includes("..") ||
+                /[\\]/.test(folderPath)
+            ) {
+                toast.error(
+                    "Use a valid folder path"
+                );
+                return;
+            }
+
+            if (
+                treeMap.has(
+                    folderPath
+                )
+            ) {
+                toast.error(
+                    "Folder already exists"
+                );
+                return;
+            }
+
+            ydocRef.current?.transact(
+                () => {
+                    addTreeEntry(
+                        folderPath,
+                        "folder"
+                    );
+                }
+            );
+
+            toast.success(
+                `${folderPath} created`
+            );
+
+        };
+
+
+    const handleDeleteFolder =
+        (folderPath) => {
+
+            const filesMap =
+                filesMapRef.current;
+
+            const treeMap =
+                fileTreeMapRef.current;
+
+            if (
+                !filesMap ||
+                !treeMap ||
+                !folderPath
+            ) {
+                return;
+            }
+
+            const prefix =
+                `${folderPath}/`;
+
+            const filesInside =
+                Array.from(
+                    filesMap.keys()
+                ).filter(
+                    (filePath) =>
+                        filePath.startsWith(
+                            prefix
+                        )
+                );
+
+            if (
+                !filesInside.length &&
+                !treeMap.has(folderPath)
+            ) {
+                return;
+            }
+
+            if (
+                !window.confirm(
+                    `Delete folder "${folderPath}" and everything inside it?`
+                )
+            ) {
+                return;
+            }
+
+            ydocRef.current?.transact(
+                () => {
+
+                    filesInside.forEach(
+                        (filePath) => {
+                            filesMap.delete(
+                                filePath
+                            );
+                        }
+                    );
+
+                    Array.from(
+                        treeMap.keys()
+                    )
+                        .filter(
+                            (path) =>
+                                path === folderPath ||
+                                path.startsWith(
+                                    prefix
+                                )
+                        )
+                        .forEach(
+                            (path) => {
+                                treeMap.delete(
+                                    path
+                                );
+                            }
+                        );
+
+                }
+            );
+
+            if (
+                activeFile.startsWith(
+                    prefix
+                )
+            ) {
+
+                const remaining =
+                    Array.from(
+                        filesMap.keys()
+                    );
+
+                setActiveFile(
+                    remaining[0] ||
+                        "index.js"
+                );
+
+            }
+
+            toast.success(
+                `${folderPath} deleted`
+            );
+
+        };
+
+
+    const importProjectFiles =
+        async (event) => {
+
+            const input =
+                event.target;
+
+            const selectedFiles =
+                Array.from(
+                    input.files || []
+                );
+
+            if (!selectedFiles.length) {
+                return;
+            }
+
+            const filesMap =
+                filesMapRef.current;
+
+            const treeMap =
+                fileTreeMapRef.current;
+
+            if (!filesMap || !treeMap) {
+                return;
+            }
+
+            const ignoredDirectories =
+                new Set([
+                    "node_modules",
+                    ".git",
+                    "dist",
+                    "build",
+                    ".next",
+                    ".cache",
+                    "coverage",
+                ]);
+
+            const imported = [];
+
+            for (
+                const browserFile
+                of selectedFiles
+            ) {
+
+                const relativePath =
+                    browserFile.webkitRelativePath ||
+                    browserFile.name;
+
+                const parts =
+                    relativePath
+                        .split("/")
+                        .filter(Boolean);
+
+                const cleanParts =
+                    parts.filter(
+                        (part) =>
+                            !ignoredDirectories.has(
+                                part
+                            )
+                    );
+
+                if (!cleanParts.length) {
+                    continue;
+                }
+
+                const filePath =
+                    cleanParts.join("/");
+
+                if (
+                    filePath.length > 180 ||
+                    filePath.includes("..")
+                ) {
+                    continue;
+                }
+
+                try {
+
+                    const content =
+                        await browserFile.text();
+
+                    const ytext =
+                        new Y.Text();
+
+                    ytext.insert(
+                        0,
+                        content
+                    );
+
+                    ydocRef.current?.transact(
+                        () => {
+
+                            filesMap.set(
+                                filePath,
+                                ytext
+                            );
+
+                            addTreeEntry(
+                                filePath,
+                                "file"
+                            );
+
+                        }
+                    );
+
+                    imported.push(
+                        filePath
+                    );
+
+                } catch (error) {
+
+                    console.error(
+                        "Failed to import file:",
+                        filePath,
+                        error
+                    );
+
+                }
+
+            }
+
+            if (imported.length) {
+
+                setActiveFile(
+                    imported[0]
+                );
+
+                toast.success(
+                    `${imported.length} file${imported.length === 1 ? "" : "s"} imported`
+                );
+
+            } else {
+
+                toast.error(
+                    "No files could be imported"
+                );
+
+            }
+
+            input.value = "";
+
+        };
+
+
+    const handleDeleteFile =
+        (fileName) => {
+
+            const filesMap =
+                filesMapRef.current;
+
+            if (
+                !filesMap ||
+                !filesMap.has(fileName)
+            ) {
+                return;
+            }
+
+            if (
+                filesMap.size <= 1
+            ) {
+                toast.error(
+                    "A workspace must keep one file"
+                );
+                return;
+            }
+
+            if (
+                !window.confirm(
+                    `Delete ${fileName}?`
+                )
+            ) {
+                return;
+            }
+
+            ydocRef.current?.transact(
+                () => {
+
+                    filesMap.delete(
+                        fileName
+                    );
+
+                    const treeMap =
+                        fileTreeMapRef.current;
+
+                    if (treeMap) {
+                        treeMap.delete(
+                            fileName
+                        );
+                    }
+
+                }
+            );
+
+            toast.success(
+                `${fileName} deleted`
+            );
+
+        };
 
 
     /*
@@ -1944,6 +2777,393 @@ socket.on(
         };
 
 
+    const getFileIcon =
+        (fileName) => {
+
+            const extension =
+                fileName
+                    .split(".")
+                    .pop()
+                    .toLowerCase();
+
+            if (extension === "js" || extension === "jsx") {
+                return {
+                    label: "JS",
+                    className: "js",
+                };
+            }
+
+            if (extension === "ts" || extension === "tsx") {
+                return {
+                    label: "TS",
+                    className: "js",
+                };
+            }
+
+            if (extension === "md") {
+                return {
+                    label: "#",
+                    className: "md",
+                };
+            }
+
+            if (extension === "json") {
+                return {
+                    label: "{}",
+                    className: "json",
+                };
+            }
+
+            if (extension === "css") {
+                return {
+                    label: "CSS",
+                    className: "css",
+                };
+            }
+
+            if (extension === "html") {
+                return {
+                    label: "HTML",
+                    className: "html",
+                };
+            }
+
+            if (extension === "py") {
+                return {
+                    label: "PY",
+                    className: "py",
+                };
+            }
+
+            return {
+                label: "•",
+                className: "file",
+            };
+
+        };
+
+
+
+    const toggleFolder =
+        (folderPath) => {
+
+            setCollapsedFolders(
+                (previous) => {
+
+                    const next =
+                        new Set(previous);
+
+                    if (
+                        next.has(folderPath)
+                    ) {
+                        next.delete(folderPath);
+                    } else {
+                        next.add(folderPath);
+                    }
+
+                    return next;
+                }
+            );
+        };
+
+
+    const buildFileTree =
+        () => {
+
+            const treeMap =
+                fileTreeMapRef.current;
+
+            const root = {
+                path: "",
+                folders: new Map(),
+                files: [],
+            };
+
+            if (!treeMap) {
+                return root;
+            }
+
+            const getFolder =
+                (node, name) => {
+
+                    if (!node.folders.has(name)) {
+                        node.folders.set(
+                            name,
+                            {
+                                path: node.path
+                                    ? `${node.path}/${name}`
+                                    : name,
+                                name,
+                                folders: new Map(),
+                                files: [],
+                            }
+                        );
+                    }
+
+                    return node.folders.get(name);
+                };
+
+            Array.from(treeMap.keys()).forEach(
+                (path) => {
+
+                    let metadata = {};
+
+                    try {
+                        metadata =
+                            JSON.parse(
+                                treeMap.get(path)
+                            ) || {};
+                    } catch {
+                        metadata = {};
+                    }
+
+                    const type =
+                        metadata.type ||
+                        (files.includes(path)
+                            ? "file"
+                            : "folder");
+
+                    const parts =
+                        path
+                            .split("/")
+                            .filter(Boolean);
+
+                    if (!parts.length) {
+                        return;
+                    }
+
+                    if (type === "file") {
+
+                        let node = root;
+
+                        parts
+                            .slice(0, -1)
+                            .forEach((part) => {
+                                node =
+                                    getFolder(
+                                        node,
+                                        part
+                                    );
+                            });
+
+                        if (
+                            !node.files.some(
+                                (file) =>
+                                    file.path === path
+                            )
+                        ) {
+                            node.files.push({
+                                name:
+                                    parts[
+                                        parts.length - 1
+                                    ],
+                                path,
+                            });
+                        }
+
+                    } else {
+
+                        let node = root;
+
+                        parts.forEach((part) => {
+                            node =
+                                getFolder(
+                                    node,
+                                    part
+                                );
+                        });
+                    }
+                }
+            );
+
+            const sortTree =
+                (node) => {
+
+                    node.folders =
+                        new Map(
+                            Array.from(
+                                node.folders.entries()
+                            ).sort(
+                                ([a], [b]) =>
+                                    a.localeCompare(b)
+                            )
+                        );
+
+                    node.files.sort(
+                        (a, b) =>
+                            a.name.localeCompare(
+                                b.name
+                            )
+                    );
+
+                    node.folders.forEach(
+                        sortTree
+                    );
+
+                    return node;
+                };
+
+            return sortTree(root);
+        };
+
+
+    const renderFileTree =
+        (node, depth = 0) => {
+
+            const output = [];
+
+            node.folders.forEach(
+                (folder) => {
+
+                    output.push(
+                        <div
+                            key={`folder-${folder.path}`}
+                            className="treeFolder"
+                        >
+
+                            <div
+                                className="treeRow folderRow"
+                                style={{
+                                    paddingLeft:
+                                        `${8 + depth * 14}px`,
+                                }}
+                            >
+
+                                <button
+                                    className="folderToggle"
+                                    onClick={() =>
+                                        toggleFolder(
+                                            folder.path
+                                        )
+                                    }
+                                    title={
+                                        collapsedFolders.has(
+                                            folder.path
+                                        )
+                                            ? "Expand"
+                                            : "Collapse"
+                                    }
+                                >
+                                    {
+                                        collapsedFolders.has(
+                                            folder.path
+                                        )
+                                            ? "▶"
+                                            : "▼"
+                                    }
+                                </button>
+
+                                <span className="folderIcon">
+                                    📁
+                                </span>
+
+                                <span className="fileName">
+                                    {folder.name}
+                                </span>
+
+                                <button
+                                    className="treeDeleteButton"
+                                    onClick={() =>
+                                        handleDeleteFolder(
+                                            folder.path
+                                        )
+                                    }
+                                    title={`Delete ${folder.path}`}
+                                >
+                                    ×
+                                </button>
+
+                            </div>
+
+                            {!collapsedFolders.has(
+                                folder.path
+                            ) &&
+                                renderFileTree(
+                                    folder,
+                                    depth + 1
+                                )}
+
+                        </div>
+                    );
+                }
+            );
+
+            node.files.forEach(
+                (file) => {
+
+                    const icon =
+                        getFileIcon(file.path);
+
+                    const isActive =
+                        file.path === activeFile;
+
+                    output.push(
+                        <div
+                            key={`file-${file.path}`}
+                            className={
+                                "treeRow fileRow " +
+                                (isActive
+                                    ? "active"
+                                    : "")
+                            }
+                            style={{
+                                paddingLeft:
+                                    `${24 + depth * 14}px`,
+                            }}
+                        >
+
+                            <button
+                                className={
+                                    "fileItem " +
+                                    (isActive
+                                        ? "active"
+                                        : "")
+                                }
+                                onClick={() =>
+                                    setActiveFile(
+                                        file.path
+                                    )
+                                }
+                                title={file.path}
+                            >
+
+                                <span
+                                    className={
+                                        "fileIcon " +
+                                        icon.className
+                                    }
+                                >
+                                    {icon.label}
+                                </span>
+
+                                <span className="fileName">
+                                    {file.name}
+                                </span>
+
+                            </button>
+
+                            <button
+                                className="deleteFileButton"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    handleDeleteFile(
+                                        file.path
+                                    );
+                                }}
+                                title={`Delete ${file.path}`}
+                            >
+                                ×
+                            </button>
+
+                        </div>
+                    );
+                }
+            );
+
+            return output;
+        };
+
+
     /*
     ================================================
     RENDER
@@ -1953,6 +3173,160 @@ socket.on(
     return (
 
         <div className="editorPage">
+
+            <style>{`
+                .fileTree {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 2px;
+                    margin-top: 4px;
+                    overflow-y: auto;
+                }
+
+                .treeFolder {
+                    width: 100%;
+                }
+
+                .treeRow {
+                    position: relative;
+                    display: flex;
+                    align-items: center;
+                    width: 100%;
+                    min-height: 28px;
+                    box-sizing: border-box;
+                }
+
+                .folderRow {
+                    color: #c7c9d3;
+                    font-size: 12px;
+                    font-weight: 600;
+                    border-radius: 4px;
+                }
+
+                .folderRow:hover {
+                    background: rgba(255,255,255,0.05);
+                }
+
+                .folderToggle {
+                    width: 16px;
+                    height: 24px;
+                    padding: 0;
+                    border: 0;
+                    background: transparent;
+                    color: #777b8c;
+                    cursor: pointer;
+                    font-size: 8px;
+                    flex: 0 0 16px;
+                }
+
+                .folderToggle:hover {
+                    color: #ffffff;
+                }
+
+                .folderIcon {
+                    width: 22px;
+                    flex: 0 0 22px;
+                    font-size: 13px;
+                }
+
+                .treeDeleteButton {
+                    position: absolute;
+                    right: 5px;
+                    width: 22px;
+                    height: 22px;
+                    border: 0;
+                    border-radius: 4px;
+                    background: transparent;
+                    color: #777b8c;
+                    cursor: pointer;
+                    opacity: 0;
+                    font-size: 16px;
+                }
+
+                .folderRow:hover .treeDeleteButton {
+                    opacity: 1;
+                }
+
+                .treeDeleteButton:hover {
+                    background: rgba(255,255,255,0.08);
+                    color: #ff6b6b;
+                }
+
+                .treeRow.fileRow {
+                    padding-right: 28px;
+                }
+
+                .explorerActions {
+                    display: flex;
+                    align-items: center;
+                    gap: 2px;
+                }
+
+                .explorerActions button {
+                    border: 0;
+                    background: transparent;
+                    color: #9b9eaa;
+                    cursor: pointer;
+                    padding: 3px 5px;
+                    border-radius: 4px;
+                    font-size: 12px;
+                }
+
+                .explorerActions button:hover {
+                    background: rgba(255,255,255,0.08);
+                    color: #ffffff;
+                }
+
+                .fileRow {
+                    position: relative;
+                    display: flex;
+                    align-items: center;
+                    width: 100%;
+                    min-width: 0;
+                }
+
+                .fileRow .fileItem {
+                    flex: 1;
+                    min-width: 0;
+                    padding-right: 28px;
+                }
+
+                .fileName {
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+
+                .deleteFileButton {
+                    position: absolute;
+                    right: 5px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    width: 22px;
+                    height: 22px;
+                    border: 0;
+                    border-radius: 4px;
+                    background: transparent;
+                    color: #777b8c;
+                    cursor: pointer;
+                    font-size: 16px;
+                    line-height: 20px;
+                    z-index: 2;
+                }
+
+                .deleteFileButton:hover {
+                    background: rgba(255,255,255,0.08);
+                    color: #ff6b6b;
+                }
+
+                .fileIcon.json,
+                .fileIcon.css,
+                .fileIcon.html,
+                .fileIcon.py,
+                .fileIcon.file {
+                    font-size: 8px;
+                }
+            `}</style>
 
 
             {/* =====================================
@@ -2062,9 +3436,50 @@ socket.on(
                                 EXPLORER
                             </span>
 
-                            <button>
-                                +
-                            </button>
+                            <div className="explorerActions">
+
+                                <button
+                                    onClick={
+                                        handleCreateFile
+                                    }
+                                    title="New file"
+                                >
+                                    +📄
+                                </button>
+
+                                <button
+                                    onClick={
+                                        handleCreateFolder
+                                    }
+                                    title="New folder"
+                                >
+                                    +📁
+                                </button>
+
+                                <button
+                                    onClick={() =>
+                                        projectInputRef.current?.click()
+                                    }
+                                    title="Open project"
+                                >
+                                    📂
+                                </button>
+
+                                <input
+                                    ref={projectInputRef}
+                                    type="file"
+                                    webkitdirectory=""
+                                    directory=""
+                                    multiple
+                                    onChange={
+                                        importProjectFiles
+                                    }
+                                    style={{
+                                        display: "none",
+                                    }}
+                                />
+
+                            </div>
 
                         </div>
 
@@ -2074,35 +3489,9 @@ socket.on(
                         </div>
 
 
-                        <button
-                            className="fileItem active"
-                        >
-
-                            <span
-                                className="fileIcon js"
-                            >
-                                JS
-                            </span>
-
-                            index.js
-
-                        </button>
-
-
-                        <button
-                            className="fileItem"
-                            disabled
-                        >
-
-                            <span
-                                className="fileIcon md"
-                            >
-                                #
-                            </span>
-
-                            README.md
-
-                        </button>
+                        <div className="fileTree">
+                            {renderFileTree(buildFileTree())}
+                        </div>
 
                     </div>
 
@@ -2248,11 +3637,27 @@ socket.on(
 
                         <div className="activeTab">
 
-                            <span className="jsTab">
-                                JS
+                            <span className={
+                                "jsTab " +
+                                (
+                                    getFileIcon(
+                                        activeFile ||
+                                            "index.js"
+                                    ).className
+                                )
+                            }>
+                                {
+                                    getFileIcon(
+                                        activeFile ||
+                                            "index.js"
+                                    ).label
+                                }
                             </span>
 
-                            index.js
+                            {
+                                activeFile ||
+                                "No file"
+                            }
 
                             <span className="unsaved">
                                 ●
