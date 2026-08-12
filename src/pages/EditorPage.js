@@ -1356,39 +1356,7 @@ const EditorPage = () => {
             username,
         }
     );
-
-
-    /*
-    ==========================================
-    RESTORE LOCAL CURSOR
-    ==========================================
-    */
-
-    const view =
-        editorViewRef.current;
-
-
-    if (view) {
-
-        const position =
-            view.state.selection.main.head;
-
-
-        socket.emit(
-            "cursor-update",
-            {
-
-                roomId,
-
-                position,
-
-            }
-        );
-
-    }
-
-
-    /*
+/*
     ==========================================
     NEW CONNECTION = NOT EDITING
     ==========================================
@@ -1482,6 +1450,57 @@ socket.on(
             "Room restored:",
             joinedRoom
         );
+
+        /*
+        Send the current local Yjs state only after
+        the server confirms this socket joined the room.
+        This safely merges edits made while disconnected.
+        */
+
+        const localDoc =
+            ydocRef.current;
+
+        if (
+            localDoc &&
+            joinedRoom === roomId
+        ) {
+
+            const localState =
+                Y.encodeStateAsUpdate(
+                    localDoc
+                );
+
+            socket.emit(
+                "sync-local-state",
+                {
+                    roomId,
+                    update: localState,
+                }
+            );
+
+        }
+
+        /*
+        Send the local cursor to other users after
+        the room has definitely been joined.
+        The client itself never renders its own cursor.
+        */
+
+        const view =
+            editorViewRef.current;
+
+        if (view) {
+
+            socket.emit(
+                "cursor-update",
+                {
+                    roomId,
+                    position:
+                        view.state.selection.main.head,
+                }
+            );
+
+        }
 
     }
 );
@@ -1632,6 +1651,19 @@ socket.on(
         const showRemoteCursor =
             (cursor) => {
 
+                /*
+                Never render my own cursor.
+                This also protects against stale cursor data
+                during reconnect.
+                */
+
+                if (
+                    cursor.id ===
+                    socketRef.current?.id
+                ) {
+                    return;
+                }
+
                 const view =
                     editorViewRef.current;
 
@@ -1710,9 +1742,15 @@ socket.on(
 
                     setTimeout(() => {
 
-                        cursors.forEach(
-                            showRemoteCursor
-                        );
+                        cursors
+                            .filter(
+                                (cursor) =>
+                                    cursor.id !==
+                                    socketRef.current?.id
+                            )
+                            .forEach(
+                                showRemoteCursor
+                            );
 
                     }, 100);
 
@@ -1721,9 +1759,15 @@ socket.on(
                 }
 
 
-                cursors.forEach(
-                    showRemoteCursor
-                );
+                cursors
+                    .filter(
+                        (cursor) =>
+                            cursor.id !==
+                            socketRef.current?.id
+                    )
+                    .forEach(
+                        showRemoteCursor
+                    );
 
             };
 

@@ -656,6 +656,71 @@ io.on("connection", (socket) => {
     ==============================================
     */
 
+    /*
+    ==================================================
+    RECONNECT / OFFLINE LOCAL STATE SYNC
+    ==================================================
+    */
+
+    socket.on(
+        "sync-local-state",
+        async ({ roomId, update }) => {
+
+            if (
+                !roomId ||
+                !update ||
+                socket.roomId !== roomId
+            ) {
+                return;
+            }
+
+            try {
+
+                const ydoc =
+                    await getRoomDocument(
+                        roomId
+                    );
+
+                /*
+                Merge the client's local/offline Yjs state
+                into the authoritative room document.
+                */
+
+                Y.applyUpdate(
+                    ydoc,
+                    new Uint8Array(update),
+                    socket
+                );
+
+                /*
+                Send the merged update to everyone else.
+                The reconnecting client already has the changes.
+                */
+
+                socket
+                    .to(roomId)
+                    .emit(
+                        "y-update",
+                        update
+                    );
+
+                scheduleRoomSave(
+                    roomId
+                );
+
+            } catch (error) {
+
+                console.error(
+                    "Local reconnect sync error:",
+                    error
+                );
+
+            }
+
+        }
+    );
+
+
     socket.on(
         "y-update",
         async ({ roomId, update }) => {
