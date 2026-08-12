@@ -29,7 +29,34 @@ YJS ROOM DOCUMENTS
 
 const roomDocuments = new Map();
 
+function getRoomUsers(roomId) {
+    const room = io.sockets.adapter.rooms.get(roomId);
 
+    const users = [];
+
+    if (room) {
+        room.forEach((socketId) => {
+            const userSocket =
+                io.sockets.sockets.get(socketId);
+
+            if (userSocket) {
+                users.push({
+                    id: socketId,
+                    username: userSocket.username,
+                });
+            }
+        });
+    }
+
+    return users;
+}
+
+
+function broadcastRoomUsers(roomId) {
+    io.to(roomId).emit("room-users", {
+        users: getRoomUsers(roomId),
+    });
+}
 function getRoomDocument(roomId) {
 
     if (!roomDocuments.has(roomId)) {
@@ -262,151 +289,98 @@ io.on("connection", (socket) => {
     socket.isEditing = false;
 
 
-    /*
-    ==============================================
-    JOIN ROOM
-    ==============================================
-    */
+socket.on("join-room", ({ roomId, username }) => {
 
-    socket.on(
-        "join-room",
-        ({ roomId, username }) => {
+    socket.join(roomId);
 
-            socket.join(roomId);
+    socket.roomId = roomId;
+    socket.username = username;
 
-            socket.roomId =
-                roomId;
+    // Every connection/reconnection starts
+    // as not editing.
+    socket.isEditing = false;
 
-            socket.username =
-                username;
-
-            socket.isEditing =
-                false;
+    console.log(
+        `${username} joined/rejoined room ${roomId}`
+    );
 
 
-            console.log(
-                `${username} joined room ${roomId}`
-            );
+    // -----------------------------------------
+    // SEND COLLABORATORS
+    // -----------------------------------------
+
+    broadcastRoomUsers(roomId);
 
 
-            /*
-            --------------------------------------
-            GET/CREATE YJS DOCUMENT
-            --------------------------------------
-            */
+    // -----------------------------------------
+    // TELL USER THEY JOINED
+    // -----------------------------------------
 
-            const ydoc =
-                getRoomDocument(
-                    roomId
-                );
+    socket.emit("room-joined", {
+        roomId,
+        username,
+    });
 
 
-            /*
-            --------------------------------------
-            SEND CURRENT CODE
-            --------------------------------------
-            */
+    // -----------------------------------------
+    // SEND CURRENT YJS DOCUMENT
+    // -----------------------------------------
 
-            const currentState =
-                Y.encodeStateAsUpdate(
-                    ydoc
-                );
+    const ydoc =
+        getRoomDocument(roomId);
 
+    const currentState =
+        Y.encodeStateAsUpdate(ydoc);
 
-            socket.emit(
-                "y-sync",
-                currentState
-            );
+    socket.emit(
+        "y-sync",
+        currentState
+    );
 
 
-            /*
-            --------------------------------------
-            ONLINE USERS
-            --------------------------------------
-            */
+    // -----------------------------------------
+    // SEND EXISTING CURSORS
+    // -----------------------------------------
 
-            broadcastRoomUsers(
-                roomId
-            );
+    const cursors =
+        getRoomCursors(roomId);
 
-
-            /*
-            --------------------------------------
-            EDITING USERS
-            --------------------------------------
-            */
-
-            broadcastEditingUsers(
-                roomId
-            );
-
-
-            /*
-            --------------------------------------
-            EXISTING CURSORS
-            --------------------------------------
-            */
-
-            const cursors =
+    socket.emit(
+        "room-cursors",
+        {
+            cursors:
                 Array.from(
-                    getRoomCursors(
-                        roomId
-                    ).values()
-                );
+                    cursors.values()
+                ),
+        }
+    );
 
 
-            socket.emit(
-                "room-cursors",
-                {
-                    cursors,
-                }
-            );
+    // -----------------------------------------
+    // ACTIVITY
+    // -----------------------------------------
 
+    io.to(roomId).emit(
+        "activity",
+        {
 
-            /*
-            --------------------------------------
-            ROOM JOINED
-            --------------------------------------
-            */
+            id:
+                `join-${socket.id}-${Date.now()}`,
 
-            socket.emit(
-                "room-joined",
-                {
-                    roomId,
-                    username,
-                }
-            );
+            username,
 
+            type: "join",
 
-            /*
-            --------------------------------------
-            ACTIVITY
-            --------------------------------------
-            */
+            message:
+                "joined the workspace",
 
-            io.to(roomId).emit(
-                "activity",
-                {
-
-                    id:
-                        `join-${socket.id}-${Date.now()}`,
-
-                    username,
-
-                    type:
-                        "join",
-
-                    message:
-                        "joined the workspace",
-
-                    timestamp:
-                        Date.now(),
-
-                }
-            );
+            timestamp:
+                Date.now(),
 
         }
     );
+
+});
 
 
     /*

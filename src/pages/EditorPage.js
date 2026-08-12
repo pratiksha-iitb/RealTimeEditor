@@ -1324,34 +1324,84 @@ const EditorPage = () => {
         ============================================
         */
 
-        socket.on(
-            "connect",
-            () => {
+        socket.on("connect", () => {
 
-                console.log(
-                    "Connected to CodeMesh:",
-                    socket.id
-                );
+    console.log(
+        "CodeMesh connected:",
+        socket.id
+    );
 
 
-                setConnectionStatus(
-                    "Connected"
-                );
+    setConnectionStatus(
+        "Connected"
+    );
 
 
-                socket.emit(
-                    "join-room",
-                    {
+    /*
+    ==========================================
+    IMPORTANT
 
-                        roomId,
+    Socket.IO gives us a NEW socket.id
+    after reconnection.
 
-                        username,
+    Therefore we MUST join the room again.
+    ==========================================
+    */
 
-                    }
-                );
+    socket.emit(
+        "join-room",
+        {
+            roomId,
+            username,
+        }
+    );
+
+
+    /*
+    ==========================================
+    RESTORE LOCAL CURSOR
+    ==========================================
+    */
+
+    const view =
+        editorViewRef.current;
+
+
+    if (view) {
+
+        const position =
+            view.state.selection.main.head;
+
+
+        socket.emit(
+            "cursor-update",
+            {
+
+                roomId,
+
+                position,
 
             }
         );
+
+    }
+
+
+    /*
+    ==========================================
+    NEW CONNECTION = NOT EDITING
+    ==========================================
+    */
+
+    localEditing.current =
+        false;
+
+
+    clearTimeout(
+        editingTimer.current
+    );
+
+});
 
 
         /*
@@ -1360,20 +1410,45 @@ const EditorPage = () => {
         ============================================
         */
 
-        socket.on(
-            "disconnect",
-            () => {
+        socket.on("disconnect", (reason) => {
 
-                setConnectionStatus(
-                    "Reconnecting"
-                );
+    console.log(
+        "CodeMesh disconnected:",
+        reason
+    );
 
 
-                localEditing.current =
-                    false;
+    setConnectionStatus(
+        "Reconnecting"
+    );
 
-            }
-        );
+
+    /*
+    User is no longer considered
+    actively editing.
+    */
+
+    localEditing.current =
+        false;
+
+
+    clearTimeout(
+        editingTimer.current
+    );
+
+
+    /*
+    Clear remote editing states.
+
+    This prevents ghost "editing"
+    information while disconnected.
+    */
+
+    setEditingUsers(
+        {}
+    );
+
+});
 
 
         /*
@@ -1383,15 +1458,32 @@ const EditorPage = () => {
         */
 
         socket.on(
-            "connect_error",
-            () => {
+    "connect_error",
+    (error) => {
 
-                setConnectionStatus(
-                    "Reconnecting"
-                );
-
-            }
+        console.log(
+            "CodeMesh connection error:",
+            error.message
         );
+
+
+        setConnectionStatus(
+            "Reconnecting"
+        );
+
+    }
+);
+socket.on(
+    "room-joined",
+    ({ roomId: joinedRoom }) => {
+
+        console.log(
+            "Room restored:",
+            joinedRoom
+        );
+
+    }
+);
 
 
         /*
