@@ -137,9 +137,9 @@ class RemoteCursorWidget
 
         return (
             other.username ===
-                this.username &&
+            this.username &&
             other.color ===
-                this.color
+            this.color
         );
 
     }
@@ -953,9 +953,9 @@ const EditorPage = () => {
 
 
     const [
-    ,
-    setEditingUsers
-] = useState({});
+        ,
+        setEditingUsers
+    ] = useState({});
 
 
     const [
@@ -1055,21 +1055,17 @@ const EditorPage = () => {
                             socket &&
                             socket.connected &&
                             positionToSend !==
-                                null
+                            null
                         ) {
 
                             socket.emit(
                                 "cursor-update",
                                 {
-
                                     roomId,
-
                                     fileName:
-                                        activeFile,
-
+                                        activeFileRef.current,
                                     position:
                                         positionToSend,
-
                                 }
                             );
 
@@ -1080,7 +1076,6 @@ const EditorPage = () => {
             },
             [
                 roomId,
-                activeFile,
             ]
         );
 
@@ -1511,50 +1506,50 @@ const EditorPage = () => {
 
         socket.on("connect", () => {
 
-    console.log(
-        "CodeMesh connected:",
-        socket.id
-    );
+            console.log(
+                "CodeMesh connected:",
+                socket.id
+            );
 
 
-    setConnectionStatus(
-        "Connected"
-    );
+            setConnectionStatus(
+                "Connected"
+            );
 
 
-    /*
-    ==========================================
-    IMPORTANT
+            /*
+            ==========================================
+            IMPORTANT
+        
+            Socket.IO gives us a NEW socket.id
+            after reconnection.
+        
+            Therefore we MUST join the room again.
+            ==========================================
+            */
 
-    Socket.IO gives us a NEW socket.id
-    after reconnection.
+            socket.emit(
+                "join-room",
+                {
+                    roomId,
+                    username,
+                }
+            );
+            /*
+                ==========================================
+                NEW CONNECTION = NOT EDITING
+                ==========================================
+                */
 
-    Therefore we MUST join the room again.
-    ==========================================
-    */
-
-    socket.emit(
-        "join-room",
-        {
-            roomId,
-            username,
-        }
-    );
-/*
-    ==========================================
-    NEW CONNECTION = NOT EDITING
-    ==========================================
-    */
-
-    localEditing.current =
-        false;
+            localEditing.current =
+                false;
 
 
-    clearTimeout(
-        editingTimer.current
-    );
+            clearTimeout(
+                editingTimer.current
+            );
 
-});
+        });
 
 
         /*
@@ -1565,43 +1560,43 @@ const EditorPage = () => {
 
         socket.on("disconnect", (reason) => {
 
-    console.log(
-        "CodeMesh disconnected:",
-        reason
-    );
+            console.log(
+                "CodeMesh disconnected:",
+                reason
+            );
 
 
-    setConnectionStatus(
-        "Reconnecting"
-    );
+            setConnectionStatus(
+                "Reconnecting"
+            );
 
 
-    /*
-    User is no longer considered
-    actively editing.
-    */
+            /*
+            User is no longer considered
+            actively editing.
+            */
 
-    localEditing.current =
-        false;
-
-
-    clearTimeout(
-        editingTimer.current
-    );
+            localEditing.current =
+                false;
 
 
-    /*
-    Clear remote editing states.
+            clearTimeout(
+                editingTimer.current
+            );
 
-    This prevents ghost "editing"
-    information while disconnected.
-    */
 
-    setEditingUsers(
-        {}
-    );
+            /*
+            Clear remote editing states.
+        
+            This prevents ghost "editing"
+            information while disconnected.
+            */
 
-});
+            setEditingUsers(
+                {}
+            );
+
+        });
 
 
         /*
@@ -1611,94 +1606,86 @@ const EditorPage = () => {
         */
 
         socket.on(
-    "connect_error",
-    (error) => {
+            "connect_error",
+            (error) => {
 
-        console.log(
-            "CodeMesh connection error:",
-            error.message
-        );
-
-
-        setConnectionStatus(
-            "Reconnecting"
-        );
-
-    }
-);
-socket.on(
-    "room-joined",
-    ({ roomId: joinedRoom }) => {
-
-        console.log(
-            "Room restored:",
-            joinedRoom
-        );
-
-        /*
-        Send the current local Yjs state only after
-        the server confirms this socket joined the room.
-        This safely merges edits made while disconnected.
-        */
-
-        const localDoc =
-            ydocRef.current;
-
-        if (
-            localDoc &&
-            joinedRoom === roomId
-        ) {
-
-            const localState =
-                Y.encodeStateAsUpdate(
-                    localDoc
+                console.log(
+                    "CodeMesh connection error:",
+                    error.message
                 );
 
-            socket.emit(
-                "sync-local-state",
-                {
-                    roomId,
-                    update: localState,
-                }
-            );
 
-        }
+                setConnectionStatus(
+                    "Reconnecting"
+                );
 
-        /*
-        Send the local cursor to other users after
-        the room has definitely been joined.
-        The client itself never renders its own cursor.
-        */
-
-        const view =
-            editorViewRef.current;
-
-        if (view) {
-
-            socket.emit(
-                "cursor-update",
-                {
-                    roomId,
-                    fileName:
-                        activeFile,
-                    position:
-                        view.state.selection.main.head,
-                }
-            );
-
-        }
-
-        socket.emit(
-            "request-room-cursors",
-            {
-                roomId,
-                fileName:
-                    activeFile,
             }
         );
+        socket.on(
+            "room-joined",
+            ({ roomId: joinedRoom }) => {
 
-    }
-);
+                console.log(
+                    "Room restored:",
+                    joinedRoom
+                );
+
+                const localDoc =
+                    ydocRef.current;
+
+                if (
+                    localDoc &&
+                    joinedRoom === roomId
+                ) {
+
+                    const localState =
+                        Y.encodeStateAsUpdate(
+                            localDoc
+                        );
+
+                    socket.emit(
+                        "sync-local-state",
+                        {
+                            roomId,
+                            update: localState,
+                        }
+                    );
+
+                }
+
+                /*
+                Send local cursor after room join.
+                */
+
+                const view =
+                    editorViewRef.current;
+
+                if (view) {
+
+                    socket.emit(
+                        "cursor-update",
+                        {
+                            roomId,
+                            fileName:
+                                activeFileRef.current,
+                            position:
+                                view.state.selection.main.head,
+                        }
+                    );
+
+                }
+
+                socket.emit(
+                    "request-room-cursors",
+                    {
+                        roomId,
+                        fileName:
+                            activeFileRef.current,
+                    }
+                );
+
+            }
+        );
 
 
         /*
@@ -1854,7 +1841,7 @@ socket.on(
                 if (
                     cursor.fileName &&
                     cursor.fileName !==
-                        activeFileRef.current
+                    activeFileRef.current
                 ) {
                     return;
                 }
@@ -2232,7 +2219,7 @@ socket.on(
                     const isFile =
                         type === "file" &&
                         index ===
-                            parts.length - 1;
+                        parts.length - 1;
 
                     if (
                         !treeMap.has(
@@ -2504,7 +2491,7 @@ socket.on(
 
                 setActiveFile(
                     remaining[0] ||
-                        "index.js"
+                    "index.js"
                 );
 
             }
@@ -2955,7 +2942,7 @@ socket.on(
                             node.files.push({
                                 name:
                                     parts[
-                                        parts.length - 1
+                                    parts.length - 1
                                     ],
                                 path,
                             });
@@ -3382,7 +3369,7 @@ socket.on(
                             "connectionStatus " +
                             (
                                 connectionStatus ===
-                                "Connected"
+                                    "Connected"
                                     ? "connected"
                                     : "reconnecting"
                             )
@@ -3642,14 +3629,14 @@ socket.on(
                                 (
                                     getFileIcon(
                                         activeFile ||
-                                            "index.js"
+                                        "index.js"
                                     ).className
                                 )
                             }>
                                 {
                                     getFileIcon(
                                         activeFile ||
-                                            "index.js"
+                                        "index.js"
                                     ).label
                                 }
                             </span>
@@ -3782,7 +3769,7 @@ socket.on(
 
                                 {
                                     connectionStatus ===
-                                    "Connected"
+                                        "Connected"
                                         ? "Synced"
                                         : connectionStatus
                                 }
@@ -3852,10 +3839,10 @@ socket.on(
                                                         "activityAvatar " +
                                                         (
                                                             activity.type ===
-                                                            "leave"
+                                                                "leave"
                                                                 ? "leaveAvatar"
                                                                 : activity.username ===
-                                                                  username
+                                                                    username
                                                                     ? "purpleAvatar"
                                                                     : "blueAvatar"
                                                         )
@@ -3877,7 +3864,7 @@ socket.on(
 
                                                         {
                                                             activity.username ===
-                                                            username
+                                                                username
                                                                 ? "You"
                                                                 : activity.username
                                                         }
