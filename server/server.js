@@ -504,6 +504,39 @@ function getRoomCursors(roomId) {
 
 /*
 ==================================================
+ROOM CHAT
+==================================================
+
+Chat history lives in memory only, same as
+cursors. It resets on server restart. If you
+want it to survive restarts, persist it to
+Turso the same way the Yjs document is saved.
+==================================================
+*/
+
+const roomChatMessages = new Map();
+
+
+function getRoomChatMessages(roomId) {
+
+    if (!roomChatMessages.has(roomId)) {
+
+        roomChatMessages.set(
+            roomId,
+            []
+        );
+
+    }
+
+
+    return roomChatMessages.get(
+        roomId
+    );
+}
+
+
+/*
+==================================================
 EDITING USERS
 ==================================================
 */
@@ -699,6 +732,27 @@ io.on("connection", (socket) => {
                             Array.from(
                                 cursors.values()
                             ),
+                    }
+                );
+
+
+                /*
+                ----------------------------------
+                SEND CHAT HISTORY
+                ----------------------------------
+                */
+
+                const chatMessages =
+                    getRoomChatMessages(
+                        roomId
+                    );
+
+
+                socket.emit(
+                    "chat-history",
+                    {
+                        messages:
+                            chatMessages,
                     }
                 );
 
@@ -1116,6 +1170,89 @@ io.on("connection", (socket) => {
                     cursors:
                         currentCursors,
                 }
+            );
+
+        }
+    );
+
+
+    /*
+    ==============================================
+    CHAT MESSAGE
+    ==============================================
+    */
+
+    socket.on(
+        "send-message",
+        ({ roomId, text }) => {
+
+            if (
+                !roomId ||
+                socket.roomId !== roomId
+            ) {
+                return;
+            }
+
+
+            const cleanText =
+                String(text || "")
+                    .trim()
+                    .slice(0, 2000);
+
+
+            if (!cleanText) {
+                return;
+            }
+
+
+            const message = {
+
+                id:
+                    `msg-${socket.id}-${Date.now()}-${Math.random()
+                        .toString(36)
+                        .slice(2, 8)}`,
+
+                username:
+                    socket.username || "Guest",
+
+                text:
+                    cleanText,
+
+                timestamp:
+                    Date.now(),
+
+            };
+
+
+            const messages =
+                getRoomChatMessages(
+                    roomId
+                );
+
+
+            messages.push(
+                message
+            );
+
+
+            /*
+            Keep chat history bounded per room
+            so memory doesn't grow forever.
+            */
+
+            if (messages.length > 200) {
+
+                messages.splice(
+                    0,
+                    messages.length - 200
+                );
+
+            }
+
+
+            io.to(roomId).emit(
+                "chat-message",
+                message
             );
 
         }

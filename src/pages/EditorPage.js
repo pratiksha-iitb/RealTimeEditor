@@ -982,6 +982,56 @@ const EditorPage = () => {
 
     /*
     ================================================
+    CHAT
+    ================================================
+    */
+
+    const [
+        chatMessages,
+        setChatMessages
+    ] = useState([]);
+
+    const [
+        chatInput,
+        setChatInput
+    ] = useState("");
+
+    const [
+        rightPanelTab,
+        setRightPanelTab
+    ] = useState("activity");
+
+    const [
+        unreadChatCount,
+        setUnreadChatCount
+    ] = useState(0);
+
+    const chatListRef =
+        useRef(null);
+
+    /*
+    Tracks the current tab without needing a
+    nested setState call inside another
+    updater (that pattern gets double-invoked
+    under React StrictMode in development and
+    was the cause of the unread count doubling).
+    */
+
+    const rightPanelTabRef =
+        useRef("activity");
+
+    useEffect(() => {
+
+        rightPanelTabRef.current =
+            rightPanelTab;
+
+    }, [
+        rightPanelTab,
+    ]);
+
+
+    /*
+    ================================================
     LOCAL EDIT TIMER
     ================================================
     */
@@ -1826,6 +1876,89 @@ const EditorPage = () => {
 
         /*
         ============================================
+        CHAT HISTORY
+        ============================================
+
+        Sent once right after the room is joined
+        so a reconnecting or newly joining user
+        sees what was already said.
+        ============================================
+        */
+
+        socket.on(
+            "chat-history",
+            ({ messages }) => {
+
+                setChatMessages(
+                    messages || []
+                );
+
+            }
+        );
+
+
+        /*
+        ============================================
+        CHAT MESSAGE
+        ============================================
+        */
+
+        socket.on(
+            "chat-message",
+            (message) => {
+
+                setChatMessages(
+                    (previous) => {
+
+                        if (
+                            previous.some(
+                                (item) =>
+                                    item.id ===
+                                    message.id
+                            )
+                        ) {
+
+                            return previous;
+
+                        }
+
+
+                        return [
+                            ...previous,
+                            message,
+                        ].slice(-200);
+
+                    }
+                );
+
+
+                /*
+                Only bump the unread badge for
+                messages from someone else while
+                the chat tab isn't already open.
+                Read the tab from a ref (not a
+                nested setState-in-setState call)
+                so this can't be double-invoked
+                by StrictMode's updater re-run.
+                */
+
+                if (
+                    message.username !== username &&
+                    rightPanelTabRef.current !== "chat"
+                ) {
+
+                    setUnreadChatCount(
+                        (count) => count + 1
+                    );
+
+                }
+
+            }
+        );
+
+
+        /*
+        ============================================
         REMOTE CURSOR
         ============================================
         */
@@ -2157,6 +2290,30 @@ const EditorPage = () => {
         activeFile,
         roomId,
         files,
+    ]);
+
+
+    /*
+    ================================================
+    CHAT AUTOSCROLL
+    ================================================
+    */
+
+    useEffect(() => {
+
+        if (
+            rightPanelTab === "chat" &&
+            chatListRef.current
+        ) {
+
+            chatListRef.current.scrollTop =
+                chatListRef.current.scrollHeight;
+
+        }
+
+    }, [
+        chatMessages,
+        rightPanelTab,
     ]);
 
 
@@ -2764,6 +2921,44 @@ const EditorPage = () => {
         };
 
 
+    /*
+    ================================================
+    SEND CHAT MESSAGE
+    ================================================
+    */
+
+    const handleSendChatMessage =
+        (event) => {
+
+            event.preventDefault();
+
+            const socket =
+                socketRef.current;
+
+            const text =
+                chatInput.trim();
+
+            if (
+                !socket ||
+                !socket.connected ||
+                !text
+            ) {
+                return;
+            }
+
+            socket.emit(
+                "send-message",
+                {
+                    roomId,
+                    text,
+                }
+            );
+
+            setChatInput("");
+
+        };
+
+
     const getFileIcon =
         (fileName) => {
 
@@ -3313,6 +3508,246 @@ const EditorPage = () => {
                 .fileIcon.file {
                     font-size: 8px;
                 }
+
+                /*
+                ==========================================
+                SCROLL FIX
+
+                CodeMirror's own scroller already sets
+                overflow: auto, but that only works if
+                every ancestor in the chain actually has
+                a *bounded* height. If nothing from
+                html/body down to .codeEditor is height-
+                constrained, the editor just grows with
+                its content and the whole page scrolls
+                instead of the editor scrolling
+                internally. This forces a real height
+                chain from the top down, and uses
+                !important to win regardless of what's
+                already in EditorPage.css.
+                ==========================================
+                */
+
+                html,
+                body,
+                #root {
+                    height: 100% !important;
+                }
+
+                .editorPage {
+                    height: 100vh !important;
+                    max-height: 100vh !important;
+                    display: flex !important;
+                    flex-direction: column !important;
+                    overflow: hidden !important;
+                }
+
+                .editorLayout {
+                    flex: 1 1 auto !important;
+                    min-height: 0 !important;
+                    overflow: hidden !important;
+                    display: flex !important;
+                }
+
+                .editorSidebar,
+                .rightPanel {
+                    overflow-y: auto !important;
+                }
+
+                .editorMain {
+                    flex: 1 1 auto !important;
+                    min-width: 0 !important;
+                    min-height: 0 !important;
+                    display: flex !important;
+                    flex-direction: column !important;
+                    overflow: hidden !important;
+                }
+
+                .codeEditor {
+                    flex: 1 1 auto !important;
+                    min-width: 0 !important;
+                    min-height: 0 !important;
+                    overflow: hidden !important;
+                    position: relative !important;
+                }
+
+                .codeMirrorWrapper {
+                    position: absolute !important;
+                    inset: 0 !important;
+                    overflow: hidden !important;
+                }
+
+                .codeMirrorWrapper .cm-editor {
+                    height: 100% !important;
+                }
+
+                .codeMirrorWrapper .cm-scroller {
+                    overflow: auto !important;
+                    height: 100% !important;
+                }
+
+                /*
+                ==========================================
+                CHAT
+                ==========================================
+                */
+
+                .panelTabs {
+                    display: flex;
+                    gap: 4px;
+                }
+
+                .panelTabButton {
+                    position: relative;
+                    display: inline-flex;
+                    align-items: center;
+                    border: 0;
+                    background: transparent;
+                    color: #9b9eaa;
+                    cursor: pointer;
+                    padding: 4px 10px;
+                    border-radius: 6px;
+                    font-size: 12px;
+                    font-weight: 600;
+                    letter-spacing: 0.03em;
+                }
+
+                .panelTabButton:hover {
+                    background: rgba(255,255,255,0.06);
+                    color: #ffffff;
+                }
+
+                .panelTabButton.active {
+                    background: rgba(139, 92, 246, 0.16);
+                    color: #c9b8ff;
+                }
+
+                .chatUnreadBadge {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    min-width: 16px;
+                    height: 16px;
+                    margin-left: 6px;
+                    padding: 0 4px;
+                    border-radius: 999px;
+                    background: #ef4444;
+                    color: #ffffff;
+                    font-size: 10px;
+                    font-weight: 700;
+                }
+
+                .chatPanel {
+                    display: flex;
+                    flex-direction: column;
+                    flex: 1;
+                    min-height: 0;
+                }
+
+                .chatMessages {
+                    flex: 1;
+                    min-height: 0;
+                    overflow-y: auto;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 10px;
+                    padding: 4px 2px;
+                }
+
+                .chatMessageRow {
+                    display: flex;
+                    gap: 8px;
+                    align-items: flex-start;
+                }
+
+                .chatMessageRow.own {
+                    flex-direction: row-reverse;
+                }
+
+                .chatAvatar {
+                    flex: 0 0 auto;
+                    width: 26px;
+                    height: 26px;
+                    font-size: 11px;
+                }
+
+                .chatBubbleWrap {
+                    display: flex;
+                    flex-direction: column;
+                    min-width: 0;
+                    max-width: 78%;
+                }
+
+                .chatMessageRow.own .chatBubbleWrap {
+                    align-items: flex-end;
+                }
+
+                .chatMessageMeta {
+                    display: flex;
+                    gap: 6px;
+                    align-items: baseline;
+                    font-size: 11px;
+                    color: #777b8c;
+                    margin-bottom: 2px;
+                }
+
+                .chatMessageMeta strong {
+                    color: #c7c9d3;
+                    font-size: 12px;
+                }
+
+                .chatBubble {
+                    background: rgba(255,255,255,0.06);
+                    border-radius: 10px;
+                    padding: 6px 10px;
+                    font-size: 13px;
+                    color: #e5e6ec;
+                    word-break: break-word;
+                    white-space: pre-wrap;
+                }
+
+                .chatMessageRow.own .chatBubble {
+                    background: rgba(139, 92, 246, 0.22);
+                }
+
+                .chatInputRow {
+                    display: flex;
+                    gap: 6px;
+                    margin-top: 8px;
+                    flex: 0 0 auto;
+                }
+
+                .chatInput {
+                    flex: 1;
+                    min-width: 0;
+                    background: rgba(255,255,255,0.05);
+                    border: 1px solid rgba(255,255,255,0.08);
+                    border-radius: 6px;
+                    padding: 7px 10px;
+                    color: #ffffff;
+                    font-size: 13px;
+                }
+
+                .chatInput:focus {
+                    outline: none;
+                    border-color: rgba(139, 92, 246, 0.5);
+                }
+
+                .chatSendButton {
+                    border: 0;
+                    border-radius: 6px;
+                    padding: 7px 14px;
+                    background: #8b5cf6;
+                    color: #ffffff;
+                    font-size: 12px;
+                    font-weight: 600;
+                    cursor: pointer;
+                }
+
+                .chatSendButton:disabled {
+                    opacity: 0.4;
+                    cursor: not-allowed;
+                }
             `}</style>
 
 
@@ -3791,9 +4226,69 @@ const EditorPage = () => {
 
                     <div className="panelHeader">
 
-                        <span>
-                            LIVE ACTIVITY
-                        </span>
+                        <div className="panelTabs">
+
+                            <button
+                                className={
+                                    "panelTabButton " +
+                                    (
+                                        rightPanelTab === "activity"
+                                            ? "active"
+                                            : ""
+                                    )
+                                }
+                                onClick={() =>
+                                    setRightPanelTab(
+                                        "activity"
+                                    )
+                                }
+                            >
+                                Activity
+                            </button>
+
+                            <button
+                                className={
+                                    "panelTabButton " +
+                                    (
+                                        rightPanelTab === "chat"
+                                            ? "active"
+                                            : ""
+                                    )
+                                }
+                                onClick={() => {
+
+                                    setRightPanelTab(
+                                        "chat"
+                                    );
+
+                                    setUnreadChatCount(
+                                        0
+                                    );
+
+                                }}
+                            >
+
+                                Chat
+
+                                {
+                                    unreadChatCount > 0 && (
+
+                                        <span className="chatUnreadBadge">
+
+                                            {
+                                                unreadChatCount > 99
+                                                    ? "99+"
+                                                    : unreadChatCount
+                                            }
+
+                                        </span>
+
+                                    )
+                                }
+
+                            </button>
+
+                        </div>
 
 
                         <span className="liveBadge">
@@ -3803,105 +4298,269 @@ const EditorPage = () => {
                     </div>
 
 
-                    <div className="activityList">
+                    {
+                        rightPanelTab === "activity"
+                            ? (
 
-                        {
-                            activities.length === 0
-                                ? (
+                                <div className="activityList">
 
-                                    <div className="emptyActivity">
+                                    {
+                                        activities.length === 0
+                                            ? (
 
-                                        <span>
-                                            No activity yet
-                                        </span>
+                                                <div className="emptyActivity">
 
-                                        <small>
-                                            Activity will appear here
-                                        </small>
-
-                                    </div>
-
-                                )
-                                : (
-
-                                    activities.map(
-                                        (activity) => (
-
-                                            <div
-                                                className="activityItem"
-                                                key={
-                                                    activity.id
-                                                }
-                                            >
-
-                                                <div
-                                                    className={
-                                                        "activityAvatar " +
-                                                        (
-                                                            activity.type ===
-                                                                "leave"
-                                                                ? "leaveAvatar"
-                                                                : activity.username ===
-                                                                    username
-                                                                    ? "purpleAvatar"
-                                                                    : "blueAvatar"
-                                                        )
-                                                    }
-                                                >
-
-                                                    {
-                                                        activity.username
-                                                            ?.charAt(0)
-                                                            .toUpperCase()
-                                                    }
-
-                                                </div>
-
-
-                                                <div className="activityContent">
-
-                                                    <strong>
-
-                                                        {
-                                                            activity.username ===
-                                                                username
-                                                                ? "You"
-                                                                : activity.username
-                                                        }
-
-                                                    </strong>
-
-
-                                                    <p>
-
-                                                        {
-                                                            activity.message
-                                                        }
-
-                                                    </p>
-
+                                                    <span>
+                                                        No activity yet
+                                                    </span>
 
                                                     <small>
-
-                                                        {
-                                                            formatTimeAgo(
-                                                                activity.timestamp
-                                                            )
-                                                        }
-
+                                                        Activity will appear here
                                                     </small>
 
                                                 </div>
 
-                                            </div>
+                                            )
+                                            : (
 
-                                        )
-                                    )
+                                                activities.map(
+                                                    (activity) => (
 
-                                )
-                        }
+                                                        <div
+                                                            className="activityItem"
+                                                            key={
+                                                                activity.id
+                                                            }
+                                                        >
 
-                    </div>
+                                                            <div
+                                                                className={
+                                                                    "activityAvatar " +
+                                                                    (
+                                                                        activity.type ===
+                                                                            "leave"
+                                                                            ? "leaveAvatar"
+                                                                            : activity.username ===
+                                                                                username
+                                                                                ? "purpleAvatar"
+                                                                                : "blueAvatar"
+                                                                    )
+                                                                }
+                                                            >
+
+                                                                {
+                                                                    activity.username
+                                                                        ?.charAt(0)
+                                                                        .toUpperCase()
+                                                                }
+
+                                                            </div>
+
+
+                                                            <div className="activityContent">
+
+                                                                <strong>
+
+                                                                    {
+                                                                        activity.username ===
+                                                                            username
+                                                                            ? "You"
+                                                                            : activity.username
+                                                                    }
+
+                                                                </strong>
+
+
+                                                                <p>
+
+                                                                    {
+                                                                        activity.message
+                                                                    }
+
+                                                                </p>
+
+
+                                                                <small>
+
+                                                                    {
+                                                                        formatTimeAgo(
+                                                                            activity.timestamp
+                                                                        )
+                                                                    }
+
+                                                                </small>
+
+                                                            </div>
+
+                                                        </div>
+
+                                                    )
+                                                )
+
+                                            )
+                                    }
+
+                                </div>
+
+                            )
+                            : (
+
+                                <div className="chatPanel">
+
+                                    <div
+                                        className="chatMessages"
+                                        ref={
+                                            chatListRef
+                                        }
+                                    >
+
+                                        {
+                                            chatMessages.length === 0
+                                                ? (
+
+                                                    <div className="emptyActivity">
+
+                                                        <span>
+                                                            No messages yet
+                                                        </span>
+
+                                                        <small>
+                                                            Say hello to your collaborators
+                                                        </small>
+
+                                                    </div>
+
+                                                )
+                                                : (
+
+                                                    chatMessages.map(
+                                                        (message) => {
+
+                                                            const isMe =
+                                                                message.username ===
+                                                                username;
+
+                                                            return (
+
+                                                                <div
+                                                                    className={
+                                                                        "chatMessageRow " +
+                                                                        (
+                                                                            isMe
+                                                                                ? "own"
+                                                                                : ""
+                                                                        )
+                                                                    }
+                                                                    key={
+                                                                        message.id
+                                                                    }
+                                                                >
+
+                                                                    <div
+                                                                        className={
+                                                                            "userAvatar chatAvatar " +
+                                                                            (
+                                                                                isMe
+                                                                                    ? "purpleAvatar"
+                                                                                    : "blueAvatar"
+                                                                            )
+                                                                        }
+                                                                    >
+
+                                                                        {
+                                                                            message.username
+                                                                                ?.charAt(0)
+                                                                                .toUpperCase()
+                                                                        }
+
+                                                                    </div>
+
+
+                                                                    <div className="chatBubbleWrap">
+
+                                                                        <div className="chatMessageMeta">
+
+                                                                            <strong>
+                                                                                {
+                                                                                    isMe
+                                                                                        ? "You"
+                                                                                        : message.username
+                                                                                }
+                                                                            </strong>
+
+                                                                            <small>
+                                                                                {
+                                                                                    formatTimeAgo(
+                                                                                        message.timestamp
+                                                                                    )
+                                                                                }
+                                                                            </small>
+
+                                                                        </div>
+
+
+                                                                        <div className="chatBubble">
+                                                                            {
+                                                                                message.text
+                                                                            }
+                                                                        </div>
+
+                                                                    </div>
+
+                                                                </div>
+
+                                                            );
+
+                                                        }
+                                                    )
+
+                                                )
+                                        }
+
+                                    </div>
+
+
+                                    <form
+                                        className="chatInputRow"
+                                        onSubmit={
+                                            handleSendChatMessage
+                                        }
+                                    >
+
+                                        <input
+                                            type="text"
+                                            className="chatInput"
+                                            placeholder="Message the room..."
+                                            value={
+                                                chatInput
+                                            }
+                                            maxLength={
+                                                2000
+                                            }
+                                            onChange={
+                                                (event) =>
+                                                    setChatInput(
+                                                        event.target.value
+                                                    )
+                                            }
+                                        />
+
+                                        <button
+                                            type="submit"
+                                            className="chatSendButton"
+                                            disabled={
+                                                !chatInput.trim()
+                                            }
+                                        >
+                                            Send
+                                        </button>
+
+                                    </form>
+
+                                </div>
+
+                            )
+                    }
 
 
                     <div className="panelDivider" />
