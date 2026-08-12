@@ -2,7 +2,9 @@ const express = require("express");
 const http = require("http");
 const cors = require("cors");
 const { Server } = require("socket.io");
+const sqlite3 = require("sqlite3").verbose();
 const Y = require("yjs");
+require("dotenv").config();
 
 const app = express();
 
@@ -18,7 +20,57 @@ const io = new Server(server, {
     },
 });
 
-const PORT = 5001;
+const PORT = process.env.PORT || 5001;
+
+/*
+==================================================
+SQLITE
+==================================================
+*/
+
+const db = new sqlite3.Database("./codemesh.db", (error) => {
+    if (error) {
+        console.error("SQLite connection error:", error);
+    } else {
+        console.log("SQLite connected");
+    }
+});
+
+db.run(
+    `
+    CREATE TABLE IF NOT EXISTS rooms (
+        roomId TEXT PRIMARY KEY,
+        yjsState BLOB,
+        updatedAt TEXT
+    )
+    `,
+    (error) => {
+        if (error) {
+            console.error("Failed to create rooms table:", error);
+        } else {
+            console.log("SQLite rooms table ready");
+        }
+    }
+);
+
+
+/*
+==================================================
+DEFAULT CODE
+==================================================
+*/
+
+const DEFAULT_CODE = `const workspace = {
+    name: "CodeMesh",
+    status: "connected"
+};
+
+function collaborate() {
+    console.log("Building together...");
+}
+
+collaborate();
+`;
 
 
 /*
@@ -29,120 +81,303 @@ YJS ROOM DOCUMENTS
 
 const roomDocuments = new Map();
 
-function getRoomUsers(roomId) {
-    const room = io.sockets.adapter.rooms.get(roomId);
+/*
+Prevent multiple users from loading
+the same room from SQLite at the same time.
+*/
 
-    const users = [];
+const roomLoadingPromises = new Map();
 
-    if (room) {
-        room.forEach((socketId) => {
-            const userSocket =
-                io.sockets.sockets.get(socketId);
+/*
+Debounced save timers.
+*/
 
-            if (userSocket) {
-                users.push({
-                    id: socketId,
-                    username: userSocket.username,
-                });
-            }
-        });
+const roomSaveTimers = new Map();
+
+
+/*
+==================================================
+GET / CREATE ROOM DOCUMENT
+==================================================
+*/
+
+async function getRoomDocument(roomId) {
+
+    /*
+    Already loaded in memory
+    */
+
+    if (roomDocuments.has(roomId)) {
+        return roomDocuments.get(roomId);
     }
 
-    return users;
-}
+
+    /*
+    Someone else is already loading
+    this room.
+    */
+
+    if (roomLoadingPromises.has(roomId)) {
+        return await roomLoadingPromises.get(roomId);
+    }
 
 
-function broadcastRoomUsers(roomId) {
-    io.to(roomId).emit("room-users", {
-        users: getRoomUsers(roomId),
-    });
-}
-function getRoomDocument(roomId) {
+    const loadingPromise = new Promise((resolve, reject) => {
 
-    if (!roomDocuments.has(roomId)) {
-
-        const ydoc = new Y.Doc();
-
-        const ytext =
-            ydoc.getText("codemirror");
-
-
-        ydoc.transact(() => {
-
-            ytext.insert(
-                0,
-`const workspace = {
-    name: "CodeMesh",
-    status: "connected"
-};
-
-function collaborate() {
-    console.log("Building together...");
-}
-
-collaborate();
-`
-            );
-
-        });
-
-
-        roomDocuments.set(
-            roomId,
-            ydoc
+        console.log(
+            `Loading room ${roomId} from SQLite...`
         );
+
+
+        db.get(
+            `
+            SELECT yjsState
+            FROM rooms
+            WHERE roomId = ?
+            `,
+            [roomId],
+            (error, row) => {
+
+                if (error) {
+
+                    console.error(
+                        `Failed to load room ${roomId}:`,
+                        error
+                    );
+
+                    reject(error);
+                    return;
+                }
+
+
+                const ydoc = new Y.Doc();
+
+                const ytext =
+                    ydoc.getText("codemirror");
+
+
+                /*
+                ==========================================
+                EXISTING ROOM
+                ==========================================
+                */
+
+                if (
+                    row &&
+                    row.yjsState
+                ) {
+
+                    console.log(
+                        `Restoring saved Yjs document for room ${roomId}`
+                    );
+
+
+                    Y.applyUpdate(
+                        ydoc,
+                        new Uint8Array(row.yjsState)
+                    );
+
+                }
+
+
+                /*
+                ==========================================
+                NEW ROOM
+                ==========================================
+                */
+
+                else {
+
+                    console.log(
+                        `Creating new room ${roomId}`
+                    );
+
+
+                    ydoc.transact(() => {
+
+                        ytext.insert(
+                            0,
+                            DEFAULT_CODE
+                        );
+
+                    });
+
+                }
+
+
+                roomDocuments.set(
+                    roomId,
+                    ydoc
+                );
+
+
+                resolve(ydoc);
+
+            }
+        );
+
+    });
+
+
+    roomLoadingPromises.set(
+        roomId,
+        loadingPromise
+    );
+
+
+    try {
+
+        return await loadingPromise;
+
+    } finally {
+
+        roomLoadingPromises.delete(
+            roomId
+        );
+
     }
-
-
-    return roomDocuments.get(roomId);
 }
 
 
 /*
 ==================================================
-ROOM CURSORS
-==================================================
-
-roomCursors:
-
-roomId
-   ↓
-socketId
-   ↓
-{
-    id,
-    username,
-    position
-}
-
-This is completely separate from
-the code/Yjs synchronization.
+SAVE YJS DOCUMENT TO SQLITE
 ==================================================
 */
 
-const roomCursors = new Map();
+async function saveRoomDocument(roomId) {
+
+    const ydoc =
+        roomDocuments.get(roomId);
 
 
-function getRoomCursors(roomId) {
+    if (!ydoc) {
+        return;
+    }
 
-    if (!roomCursors.has(roomId)) {
 
-        roomCursors.set(
-            roomId,
-            new Map()
+    try {
+
+        /*
+        Convert complete Yjs document
+        into binary state.
+        */
+
+        const update =
+            Y.encodeStateAsUpdate(ydoc);
+
+
+        const buffer =
+            Buffer.from(update);
+
+
+        const updatedAt =
+            new Date().toISOString();
+
+
+        await new Promise(
+            (resolve, reject) => {
+
+                db.run(
+                    `
+                    INSERT INTO rooms
+                        (roomId, yjsState, updatedAt)
+
+                    VALUES
+                        (?, ?, ?)
+
+                    ON CONFLICT(roomId)
+                    DO UPDATE SET
+                        yjsState = excluded.yjsState,
+                        updatedAt = excluded.updatedAt
+                    `,
+                    [
+                        roomId,
+                        buffer,
+                        updatedAt,
+                    ],
+                    (error) => {
+
+                        if (error) {
+                            reject(error);
+                        } else {
+                            resolve();
+                        }
+
+                    }
+                );
+
+            }
+        );
+
+
+        console.log(
+            `Room ${roomId} saved to SQLite`
+        );
+
+    } catch (error) {
+
+        console.error(
+            `Failed to save room ${roomId}:`,
+            error
         );
 
     }
+}
 
-    return roomCursors.get(
-        roomId
+
+/*
+==================================================
+DEBOUNCED SAVE
+==================================================
+
+Don't save on every keystroke.
+
+Typing
+   ↓
+Yjs update
+   ↓
+wait 500ms
+   ↓
+save latest document
+==================================================
+*/
+
+function scheduleRoomSave(roomId) {
+
+    clearTimeout(
+        roomSaveTimers.get(roomId)
+    );
+
+
+    const timer =
+        setTimeout(
+            async () => {
+
+                roomSaveTimers.delete(
+                    roomId
+                );
+
+
+                await saveRoomDocument(
+                    roomId
+                );
+
+            },
+            500
+        );
+
+
+    roomSaveTimers.set(
+        roomId,
+        timer
     );
 }
 
 
 /*
 ==================================================
-ONLINE USERS
+ROOM USERS
 ==================================================
 */
 
@@ -153,7 +388,9 @@ function getRoomUsers(roomId) {
             roomId
         );
 
+
     const users = [];
+
 
     if (!room) {
         return users;
@@ -167,15 +404,14 @@ function getRoomUsers(roomId) {
                 socketId
             );
 
+
         if (userSocket) {
 
             users.push({
-
                 id: socketId,
 
                 username:
                     userSocket.username,
-
             });
 
         }
@@ -202,6 +438,33 @@ function broadcastRoomUsers(roomId) {
 
 /*
 ==================================================
+ROOM CURSORS
+==================================================
+*/
+
+const roomCursors = new Map();
+
+
+function getRoomCursors(roomId) {
+
+    if (!roomCursors.has(roomId)) {
+
+        roomCursors.set(
+            roomId,
+            new Map()
+        );
+
+    }
+
+
+    return roomCursors.get(
+        roomId
+    );
+}
+
+
+/*
+==================================================
 EDITING USERS
 ==================================================
 */
@@ -213,7 +476,9 @@ function broadcastEditingUsers(roomId) {
             roomId
         );
 
+
     const editingUsers = [];
+
 
     if (!room) {
         return;
@@ -227,6 +492,7 @@ function broadcastEditingUsers(roomId) {
                 socketId
             );
 
+
         if (
             userSocket &&
             userSocket.isEditing
@@ -234,7 +500,8 @@ function broadcastEditingUsers(roomId) {
 
             editingUsers.push({
 
-                id: socketId,
+                id:
+                    socketId,
 
                 username:
                     userSocket.username,
@@ -289,98 +556,173 @@ io.on("connection", (socket) => {
     socket.isEditing = false;
 
 
-socket.on("join-room", ({ roomId, username }) => {
+    /*
+    ==============================================
+    JOIN ROOM
+    ==============================================
+    */
 
-    socket.join(roomId);
+    socket.on(
+        "join-room",
+        async ({ roomId, username }) => {
 
-    socket.roomId = roomId;
-    socket.username = username;
+            try {
 
-    // Every connection/reconnection starts
-    // as not editing.
-    socket.isEditing = false;
+                socket.join(roomId);
 
-    console.log(
-        `${username} joined/rejoined room ${roomId}`
-    );
+                socket.roomId =
+                    roomId;
 
+                socket.username =
+                    username;
 
-    // -----------------------------------------
-    // SEND COLLABORATORS
-    // -----------------------------------------
-
-    broadcastRoomUsers(roomId);
-
-
-    // -----------------------------------------
-    // TELL USER THEY JOINED
-    // -----------------------------------------
-
-    socket.emit("room-joined", {
-        roomId,
-        username,
-    });
+                socket.isEditing =
+                    false;
 
 
-    // -----------------------------------------
-    // SEND CURRENT YJS DOCUMENT
-    // -----------------------------------------
-
-    const ydoc =
-        getRoomDocument(roomId);
-
-    const currentState =
-        Y.encodeStateAsUpdate(ydoc);
-
-    socket.emit(
-        "y-sync",
-        currentState
-    );
+                console.log(
+                    `${username} joined/rejoined room ${roomId}`
+                );
 
 
-    // -----------------------------------------
-    // SEND EXISTING CURSORS
-    // -----------------------------------------
+                /*
+                ----------------------------------
+                LOAD ROOM FROM SQLITE
+                ----------------------------------
+                */
 
-    const cursors =
-        getRoomCursors(roomId);
+                const ydoc =
+                    await getRoomDocument(
+                        roomId
+                    );
 
-    socket.emit(
-        "room-cursors",
-        {
-            cursors:
-                Array.from(
-                    cursors.values()
-                ),
+
+                /*
+                ----------------------------------
+                SEND COLLABORATORS
+                ----------------------------------
+                */
+
+                broadcastRoomUsers(
+                    roomId
+                );
+
+
+                /*
+                ----------------------------------
+                TELL USER THEY JOINED
+                ----------------------------------
+                */
+
+                socket.emit(
+                    "room-joined",
+                    {
+                        roomId,
+                        username,
+                    }
+                );
+
+
+                /*
+                ----------------------------------
+                SEND CURRENT YJS DOCUMENT
+                ----------------------------------
+                */
+
+                const currentState =
+                    Y.encodeStateAsUpdate(
+                        ydoc
+                    );
+
+
+                socket.emit(
+                    "y-sync",
+                    currentState
+                );
+
+
+                /*
+                ----------------------------------
+                SEND EXISTING CURSORS
+                ----------------------------------
+                */
+
+                const cursors =
+                    getRoomCursors(
+                        roomId
+                    );
+
+
+                socket.emit(
+                    "room-cursors",
+                    {
+                        cursors:
+                            Array.from(
+                                cursors.values()
+                            ),
+                    }
+                );
+
+
+                /*
+                ----------------------------------
+                SEND EDITING USERS
+                ----------------------------------
+                */
+
+                broadcastEditingUsers(
+                    roomId
+                );
+
+
+                /*
+                ----------------------------------
+                ACTIVITY
+                ----------------------------------
+                */
+
+                io.to(roomId).emit(
+                    "activity",
+                    {
+
+                        id:
+                            `join-${socket.id}-${Date.now()}`,
+
+                        username,
+
+                        type:
+                            "join",
+
+                        message:
+                            "joined the workspace",
+
+                        timestamp:
+                            Date.now(),
+
+                    }
+                );
+
+
+            } catch (error) {
+
+                console.error(
+                    "Error joining room:",
+                    error
+                );
+
+
+                socket.emit(
+                    "room-error",
+                    {
+                        message:
+                            "Could not load workspace",
+                    }
+                );
+
+            }
+
         }
     );
-
-
-    // -----------------------------------------
-    // ACTIVITY
-    // -----------------------------------------
-
-    io.to(roomId).emit(
-        "activity",
-        {
-
-            id:
-                `join-${socket.id}-${Date.now()}`,
-
-            username,
-
-            type: "join",
-
-            message:
-                "joined the workspace",
-
-            timestamp:
-                Date.now(),
-
-        }
-    );
-
-});
 
 
     /*
@@ -391,23 +733,30 @@ socket.on("join-room", ({ roomId, username }) => {
 
     socket.on(
         "y-update",
-        ({ roomId, update }) => {
+        async ({ roomId, update }) => {
 
             if (
                 !roomId ||
-                !update
+                !update ||
+                socket.roomId !== roomId
             ) {
                 return;
             }
 
 
-            const ydoc =
-                getRoomDocument(
-                    roomId
-                );
-
-
             try {
+
+                const ydoc =
+                    await getRoomDocument(
+                        roomId
+                    );
+
+
+                /*
+                ----------------------------------
+                APPLY UPDATE TO SERVER YJS DOC
+                ----------------------------------
+                */
 
                 Y.applyUpdate(
                     ydoc,
@@ -417,8 +766,9 @@ socket.on("join-room", ({ roomId, username }) => {
 
 
                 /*
-                Send update to everyone
-                EXCEPT sender.
+                ----------------------------------
+                SEND TO OTHER USERS
+                ----------------------------------
                 */
 
                 socket
@@ -427,6 +777,18 @@ socket.on("join-room", ({ roomId, username }) => {
                         "y-update",
                         update
                     );
+
+
+                /*
+                ----------------------------------
+                SAVE TO SQLITE
+                ----------------------------------
+                */
+
+                scheduleRoomSave(
+                    roomId
+                );
+
 
             } catch (error) {
 
@@ -459,24 +821,11 @@ socket.on("join-room", ({ roomId, username }) => {
             }
 
 
-            /*
-            Already editing?
-
-            Do nothing.
-            */
-
             if (!socket.isEditing) {
 
                 socket.isEditing =
                     true;
 
-
-                /*
-                IMPORTANT:
-
-                This ONLY represents the
-                person who actually typed.
-                */
 
                 io.to(roomId).emit(
                     "activity",
@@ -500,13 +849,30 @@ socket.on("join-room", ({ roomId, username }) => {
                     }
                 );
 
+
+                /*
+                Update collaborator editing state
+                */
+
+                io.to(roomId).emit(
+                    "editing-state",
+                    {
+                        id:
+                            socket.id,
+
+                        username:
+                            socket.username,
+
+                        editing:
+                            true,
+                    }
+                );
+
             }
 
 
             /*
-            --------------------------------------
-            5 SECOND INACTIVITY
-            --------------------------------------
+            Reset inactivity timer
             */
 
             clearTimeout(
@@ -515,29 +881,32 @@ socket.on("join-room", ({ roomId, username }) => {
 
 
             socket.editingTimeout =
-                setTimeout(() => {
+                setTimeout(
+                    () => {
 
-                    socket.isEditing =
-                        false;
+                        socket.isEditing =
+                            false;
 
 
-                    io.to(roomId).emit(
-                        "editing-state",
-                        {
+                        io.to(roomId).emit(
+                            "editing-state",
+                            {
 
-                            id:
-                                socket.id,
+                                id:
+                                    socket.id,
 
-                            username:
-                                socket.username,
+                                username:
+                                    socket.username,
 
-                            editing:
-                                false,
+                                editing:
+                                    false,
 
-                        }
-                    );
+                            }
+                        );
 
-                }, 5000);
+                    },
+                    5000
+                );
 
         }
     );
@@ -546,13 +915,6 @@ socket.on("join-room", ({ roomId, username }) => {
     /*
     ==============================================
     CURSOR UPDATE
-    ==============================================
-
-    This is NOT code synchronization.
-
-    It only tells other users:
-
-    "My cursor is currently at position X."
     ==============================================
     */
 
@@ -594,19 +956,11 @@ socket.on("join-room", ({ roomId, username }) => {
             };
 
 
-            /*
-            Save latest cursor.
-            */
-
             cursors.set(
                 socket.id,
                 cursor
             );
 
-
-            /*
-            Send ONLY to other users.
-            */
 
             socket
                 .to(roomId)
@@ -627,7 +981,7 @@ socket.on("join-room", ({ roomId, username }) => {
 
     socket.on(
         "disconnect",
-        () => {
+        async () => {
 
             console.log(
                 `${socket.username || "User"} disconnected`
@@ -649,9 +1003,20 @@ socket.on("join-room", ({ roomId, username }) => {
 
 
             /*
-            --------------------------------------
+            ----------------------------------
+            SAVE LATEST ROOM STATE
+            ----------------------------------
+            */
+
+            await saveRoomDocument(
+                roomId
+            );
+
+
+            /*
+            ----------------------------------
             REMOVE CURSOR
-            --------------------------------------
+            ----------------------------------
             */
 
             const cursors =
@@ -675,9 +1040,9 @@ socket.on("join-room", ({ roomId, username }) => {
 
 
             /*
-            --------------------------------------
+            ----------------------------------
             EDITING STATE
-            --------------------------------------
+            ----------------------------------
             */
 
             if (socket.isEditing) {
@@ -702,9 +1067,9 @@ socket.on("join-room", ({ roomId, username }) => {
 
 
             /*
-            --------------------------------------
+            ----------------------------------
             USERS
-            --------------------------------------
+            ----------------------------------
             */
 
             broadcastRoomUsers(
@@ -713,9 +1078,9 @@ socket.on("join-room", ({ roomId, username }) => {
 
 
             /*
-            --------------------------------------
+            ----------------------------------
             EDITING USERS
-            --------------------------------------
+            ----------------------------------
             */
 
             broadcastEditingUsers(
@@ -724,9 +1089,9 @@ socket.on("join-room", ({ roomId, username }) => {
 
 
             /*
-            --------------------------------------
+            ----------------------------------
             LEAVE ACTIVITY
-            --------------------------------------
+            ----------------------------------
             */
 
             io.to(roomId).emit(
@@ -773,4 +1138,65 @@ server.listen(
         );
 
     }
+);
+
+
+/*
+==================================================
+GRACEFUL SHUTDOWN
+==================================================
+*/
+
+async function shutdown() {
+
+    console.log(
+        "\nSaving rooms before shutdown..."
+    );
+
+
+    /*
+    Save every currently loaded room.
+    */
+
+    const savePromises = [];
+
+
+    for (
+        const roomId
+        of roomDocuments.keys()
+    ) {
+
+        savePromises.push(
+            saveRoomDocument(roomId)
+        );
+
+    }
+
+
+    await Promise.all(
+        savePromises
+    );
+
+
+    db.close(() => {
+
+        console.log(
+            "SQLite closed"
+        );
+
+        process.exit(0);
+
+    });
+
+}
+
+
+process.on(
+    "SIGINT",
+    shutdown
+);
+
+process.on(
+    "SIGTERM",
+    shutdown
 );
